@@ -77,54 +77,45 @@ else:
         if not t1_data.empty and not t2_data.empty:
             import math
             
-            # --- ФУНКЦІЇ МАТЕМАТИЧНОЇ МОДЕЛІ ---
-            def get_tier(league):
+            # --- МАТЕМАТИЧНА МОДЕЛЬ ---
+            def get_tier_multiplier(league):
                 l = str(league).upper()
-                if l in ['LCK', 'LPL', 'LEC', 'MSI', 'WCS']: return 'S'
-                if l in ['LCS', 'CBLOL', 'PCS', 'VCS', 'LLA', 'LJL', 'EMEA MASTERS']: return 'A'
-                return 'B' 
-            
-            def get_handicap(prob, tier):
-                if prob < 0.5: prob = 1.0 - prob
-                if prob <= 0: prob = 0.01 
-                odds = 1.0 / prob
+                if l in ['LCK', 'LPL', 'LEC', 'MSI', 'WCS']: return 15.0 # S-Tier
+                if l in ['LCS', 'CBLOL', 'PCS', 'VCS', 'LLA', 'LJL', 'EMEA MASTERS']: return 17.5 # A-Tier
+                return 19.0 # B-Tier
                 
-                lookup = {
-                    'S': {1.1: 7.5, 1.15: 9.5, 1.2: 8.5, 1.25: 8.5, 1.3: 7.5, 1.35: 7.5, 1.4: 6.5, 1.45: 6.5, 1.5: 6.5, 1.55: 3.5, 1.6: 5.5, 1.65: 4.5, 1.7: 5.5, 1.75: 5.5, 1.8: 2.5, 1.85: 1.5},
-                    'A': {1.1: 12.5, 1.15: 11.5, 1.2: 10.5, 1.25: 9.5, 1.3: 7.5, 1.35: 8.5, 1.4: 8.5, 1.45: 7.5, 1.5: 6.5, 1.55: 6.5, 1.6: 5.5, 1.65: 4.5, 1.7: 1.5, 1.75: 4.5, 1.8: 1.5, 1.85: 3.5},
-                    'B': {1.1: 13.5, 1.15: 11.5, 1.2: 10.5, 1.25: 9.5, 1.3: 9.5, 1.35: 7.5, 1.4: 7.5, 1.45: 7.5, 1.5: 6.5, 1.55: 5.5, 1.6: 5.5, 1.65: 3.5, 1.7: 3.5, 1.75: 0.5, 1.8: 2.5, 1.85: 0.5}
-                }
-                closest_odds = min(lookup[tier].keys(), key=lambda k: abs(k - odds))
-                return lookup[tier][closest_odds]
-
             def norm_cdf(x, mu, sigma):
                 """Кумулятивна функція нормального розподілу"""
                 return 0.5 * (1 + math.erf((x - mu) / (sigma * math.sqrt(2))))
 
             def get_markets(mo_val, margin=0.075):
-                """Розраховує лінію та коефіцієнти з маржею 7.5% на основі сирого МО"""
+                """Розрахунок ринків тоталу з маржею 7.5%"""
                 if mo_val <= 0: mo_val = 0.1
-                
-                # Округлюємо до найближчого формату .5
                 line = round(mo_val * 2) / 2
-                if line % 1 == 0:
-                    line -= 0.5 
-                    
-                std_dev = math.sqrt(mo_val) # Відхилення (наближення до Пуассона)
-                
-                # Ймовірності
+                if line % 1 == 0: line -= 0.5 
+                std_dev = math.sqrt(mo_val)
                 p_under = norm_cdf(line, mu=mo_val, sigma=std_dev)
                 p_over = 1.0 - p_under
+                return line, round(1 / (p_over * (1 + margin)), 2), round(1 / (p_under * (1 + margin)), 2)
+
+            def get_hdp_markets(mu_diff, raw_total, margin=0.075):
+                """Розрахунок точних коефіцієнтів на фору"""
+                # Знаходимо найближчу лінію фори (.5)
+                if mu_diff >= 0: base_line = math.floor(mu_diff) + 0.5
+                else: base_line = math.ceil(mu_diff) - 0.5
                 
-                # Переведення в КФ із заданою маржею
-                odds_over = round(1 / (p_over * (1 + margin)), 2)
-                odds_under = round(1 / (p_under * (1 + margin)), 2)
+                h1 = -base_line
+                h2 = base_line
+                std_dev = math.sqrt(raw_total)
                 
-                return line, odds_over, odds_under
+                # Ймовірність того, що Команда 1 покриє фору (D > -h1)
+                p_t1 = 1 - norm_cdf(-h1, mu=mu_diff, sigma=std_dev)
+                p_t2 = 1 - p_t1
+                return h1, h2, round(1 / (p_t1 * (1 + margin)), 2), round(1 / (p_t2 * (1 + margin)), 2)
 
             # --- ІНТЕРФЕЙС ТА ЛОГІКА ---
             current_league = f_df['league'].iloc[0]
-            tourney_tier = get_tier(current_league)
+            tier_multiplier = get_tier_multiplier(current_league)
             
             st.markdown("---")
             st.subheader("⚙️ Настройки мат. модели" if lang == "uk" else "⚙️ Math Model Settings")
@@ -139,47 +130,44 @@ else:
             t1_prob = t1_base / 100.0
             t2_prob = t2_base / 100.0
             
-            handicap = get_handicap(t1_prob, tourney_tier)
-            
-            # Сире МО для загального тоталу
+            # --- 1. РОЗРАХУНОК ОЧІКУВАНЬ (СИРІ ДАНІ) ---
+            # 1.1 Тотал
             t1_median_total = (t1_data['kills'] + t1_data['deaths']).median()
             t2_median_total = (t2_data['kills'] + t2_data['deaths']).median()
             raw_total = (t1_median_total + t2_median_total) / 2
             
-            # Розрахунок ринків (Генерує Лінію, КФ Більше, КФ Менше)
-            t_line, t_o, t_u = get_markets(raw_total, margin=0.075)
+            # 1.2 Очікувана різниця в кілах (Математичне сподівання)
+            p_fav = t1_prob if t1_prob >= 0.5 else t2_prob
+            diff_magnitude = tier_multiplier * math.sqrt(p_fav - 0.5)
+            mu_diff = diff_magnitude if t1_prob >= 0.5 else -diff_magnitude
             
-            # Розподіл індивідуальних тоталів
-            if t1_prob >= 0.5:
-                h1, h2 = -handicap, handicap
-                it1_raw = (raw_total + handicap) / 2
-                it2_raw = (raw_total - handicap) / 2
-            else:
-                h1, h2 = handicap, -handicap
-                it1_raw = (raw_total - handicap) / 2
-                it2_raw = (raw_total + handicap) / 2
+            # 1.3 Індивідуальні тотали (Сирі)
+            it1_raw = (raw_total + mu_diff) / 2
+            it2_raw = (raw_total - mu_diff) / 2
 
-            it1_line, it1_o, it1_u = get_markets(it1_raw, margin=0.075)
-            it2_line, it2_o, it2_u = get_markets(it2_raw, margin=0.075)
-
-            # --- ГЕНЕРАЦІЯ БУКМЕКЕРСЬКОЇ ТАБЛИЦІ ---
+            # --- 2. РОЗРАХУНОК РИНКІВ (КФ З МАРЖЕЮ) ---
+            t_line, t_o, t_u = get_markets(raw_total)
+            it1_line, it1_o, it1_u = get_markets(it1_raw)
+            it2_line, it2_o, it2_u = get_markets(it2_raw)
+            h1, h2, ho1, ho2 = get_hdp_markets(mu_diff, raw_total)
+            
+            # --- 3. ГЕНЕРАЦІЯ БУКМЕКЕРСЬКОЇ ТАБЛИЦІ ---
             st.markdown("---")
             st.subheader("📊 Match markets" if lang == "uk" else "📊 Match Markets")
-            st.caption(f"Турнір: {current_league} | Клас: {tourney_tier}-Tier | Розрахункова маржа: 7.5%")
+            st.caption(f"Турнір: {current_league} | Очікувана різниця: {mu_diff:+.2f} кілів | Розрахункова маржа: 7.5%")
             
             odds1 = round(1 / (t1_prob * (1 + 0.075)), 2) if t1_prob > 0 else 0
             odds2 = round(1 / (t2_prob * (1 + 0.075)), 2) if t2_prob > 0 else 0
 
-            # Створюємо датафрейм у стилі букмекерської контори
             line_data = pd.DataFrame({
                 "Команда" if lang == "uk" else "Team": [team1, team2],
-                "Победитель" if lang == "uk" else "Win": [f"{odds1:.2f}", f"{odds2:.2f}"],
+                "Переможець" if lang == "uk" else "Win": [f"{odds1:.2f}", f"{odds2:.2f}"],
                 "Фора" if lang == "uk" else "Handicap": [f"{h1:+.1f}", f"{h2:+.1f}"],
-                "КФ Фора" if lang == "uk" else "HDP Odds": ["1.86", "1.86"], # Базовий коінфліп з маржею 7.5%
+                "КФ Фора" if lang == "uk" else "HDP Odds": [f"{ho1:.2f}", f"{ho2:.2f}"], 
                 "Тотал" if lang == "uk" else "Total": [f"{t_line}", ""],
                 "ТБ" if lang == "uk" else "Over": [f"{t_o:.2f}", ""],
                 "ТМ" if lang == "uk" else "Under": [f"{t_u:.2f}", ""],
-                "Инд. Тотал" if lang == "uk" else "Ind. Total": [f"{it1_line}", f"{it2_line}"],
+                "Інд. Тотал" if lang == "uk" else "Ind. Total": [f"{it1_line}", f"{it2_line}"],
                 "ІТБ" if lang == "uk" else "I.Over": [f"{it1_o:.2f}", f"{it2_o:.2f}"],
                 "ІТМ" if lang == "uk" else "I.Under": [f"{it1_u:.2f}", f"{it2_u:.2f}"]
             })
