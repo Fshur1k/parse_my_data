@@ -78,23 +78,18 @@ else:
             
             # === ЛОГІКА ПРЕДИКТУ ===
             
-            # 1. Предикт для кожної команди окремо (залишаємо як було, бо це їхня індивідуальна сила)
+            # 1. Рахуємо медіани кілів та смертей для кожної команди (їхній типовий виступ)
             t1_avg_kills = t1_data['kills'].median()
             t1_avg_deaths = t1_data['deaths'].median()
             t2_avg_kills = t2_data['kills'].median()
             t2_avg_deaths = t2_data['deaths'].median()
             
+            # 2. Індивідуальний предикт: шукаємо баланс між "Вмінням вбивати" Т1 та "Вмінням не вмирати" Т2
             t1_expected_kills = (t1_avg_kills + t2_avg_deaths) / 2
             t2_expected_kills = (t2_avg_kills + t1_avg_deaths) / 2
             
-            # 2. НОВИЙ ТОТАЛ МАТЧУ (за твоєю логікою)
-            # Рахуємо медіану ЗАГАЛЬНИХ кілів у матчах першої команди (її кіли + смерті)
-            t1_median_total = (t1_data['kills'] + t1_data['deaths']).median()
-            # Рахуємо медіану ЗАГАЛЬНИХ кілів у матчах другої команди
-            t2_median_total = (t2_data['kills'] + t2_data['deaths']).median()
-            
-            # Беремо середнє арифметичне від двох медіан тоталів
-            total_expected = (t1_median_total + t2_median_total) / 2
+            # 3. Загальний тотал - це просто сума очікуваних індивідуальних кілів обох команд
+            total_expected = t1_expected_kills + t2_expected_kills
             
             st.header("🎯 Предикт матчу" if lang == "uk" else "🎯 Match Prediction")
             
