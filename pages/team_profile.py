@@ -76,72 +76,73 @@ else:
         
         if not t1_data.empty and not t2_data.empty:
             
-            # === 1. ВБУДОВАНА ТАБЛИЦЯ ФОР ТА КАТЕГОРІЙ ===
             def get_tier(league):
                 l = str(league).upper()
-                # Розподіл ліг за рівнем макро-гри
                 if l in ['LCK', 'LPL', 'LEC', 'MSI', 'WCS']: return 'S'
                 if l in ['LCS', 'CBLOL', 'PCS', 'VCS', 'LLA', 'LJL', 'EMEA MASTERS']: return 'A'
-                return 'B' # Регіоналки, академії, тір-3
+                return 'B' 
             
             def get_handicap(prob, tier):
-                # Конвертуємо ймовірність фаворита у коефіцієнт
                 if prob < 0.5: prob = 1.0 - prob
                 if prob <= 0: prob = 0.01 
                 odds = 1.0 / prob
                 
-                # Емпірична матриця фор на основі розподілу Скеллама (з історичної бази)
                 lookup = {
                     'S': {1.1: 7.5, 1.15: 9.5, 1.2: 8.5, 1.25: 8.5, 1.3: 7.5, 1.35: 7.5, 1.4: 6.5, 1.45: 6.5, 1.5: 6.5, 1.55: 3.5, 1.6: 5.5, 1.65: 4.5, 1.7: 5.5, 1.75: 5.5, 1.8: 2.5, 1.85: 1.5},
                     'A': {1.1: 12.5, 1.15: 11.5, 1.2: 10.5, 1.25: 9.5, 1.3: 7.5, 1.35: 8.5, 1.4: 8.5, 1.45: 7.5, 1.5: 6.5, 1.55: 6.5, 1.6: 5.5, 1.65: 4.5, 1.7: 1.5, 1.75: 4.5, 1.8: 1.5, 1.85: 3.5},
                     'B': {1.1: 13.5, 1.15: 11.5, 1.2: 10.5, 1.25: 9.5, 1.3: 9.5, 1.35: 7.5, 1.4: 7.5, 1.45: 7.5, 1.5: 6.5, 1.55: 5.5, 1.6: 5.5, 1.65: 3.5, 1.7: 3.5, 1.75: 0.5, 1.8: 2.5, 1.85: 0.5}
                 }
-                # Знаходимо найближчий кеф у таблиці
                 closest_odds = min(lookup[tier].keys(), key=lambda k: abs(k - odds))
                 return lookup[tier][closest_odds]
 
-            # === 2. ІНТЕРФЕЙС BASELINE ===
             current_league = f_df['league'].iloc[0]
             tourney_tier = get_tier(current_league)
             
             st.markdown("---")
-            st.subheader("⚖️ Лінія матчу (Baseline %)" if lang == "uk" else "⚖️ Match Line (Baseline %)")
+            st.subheader("⚙️ Настройки мат. модели" if lang == "uk" else "⚙️ Math Model Settings")
             
-            # Повзунок для виставлення шансів (як на букмекерській карті)
-            t1_baseline = st.slider(
-                f"Шанс на перемогу {team1} (%)", 
-                min_value=1, max_value=99, value=50, step=1,
-                help="Встановіть ймовірність перемоги першої команди."
-            ) / 100.0
+            in_c1, in_c2, in_c3 = st.columns([1, 1, 2])
+            with in_c1:
+                t1_base = st.number_input(f"{team1} (%)", min_value=1.0, max_value=99.0, value=50.0, step=0.5)
+            with in_c2:
+                t2_base = 100.0 - t1_base
+                st.number_input(f"{team2} (%)", value=t2_base, disabled=True)
             
-            t2_baseline = 1.0 - t1_baseline
+            t1_prob = t1_base / 100.0
+            t2_prob = t2_base / 100.0
             
-            # Отримуємо точну фору для цього рівня турніру
-            handicap = get_handicap(t1_baseline, tourney_tier)
+            # Отримуємо чисту фору з таблиці (вона вже з кроком 0.5 або 1.0)
+            handicap = get_handicap(t1_prob, tourney_tier)
             
-            # === 3. РОЗРАХУНОК ТОТАЛІВ ===
-            # Знаходимо чистий загальний тотал гри (Медіана загальних тоталів двох команд)
+            # Точне математичне очікування Загального Тоталу
             t1_median_total = (t1_data['kills'] + t1_data['deaths']).median()
             t2_median_total = (t2_data['kills'] + t2_data['deaths']).median()
             total_expected = (t1_median_total + t2_median_total) / 2
             
-            # Розподіляємо кіли за формулою: (Тотал ± Фора) / 2
-            if t1_baseline >= 0.5:
-                # Команда 1 - фаворит
-                t1_expected_kills = (total_expected + handicap) / 2
-                t2_expected_kills = (total_expected - handicap) / 2
-                fav_name, fav_h = team1, -handicap
+            # Точний розподіл індивідуальних тоталів
+            if t1_prob >= 0.5:
+                h1, h2 = -handicap, handicap
+                it1_raw = (total_expected + handicap) / 2
+                it2_raw = (total_expected - handicap) / 2
             else:
-                # Команда 2 - фаворит
-                t1_expected_kills = (total_expected - handicap) / 2
-                t2_expected_kills = (total_expected + handicap) / 2
-                fav_name, fav_h = team2, -handicap
-                
-            # === 4. ВИВІД ДАНИХ ===
-            st.header("🎯 Предикт матчу" if lang == "uk" else "🎯 Match Prediction")
-            st.caption(f"🏆 Турнір: {current_league} (Клас: {tourney_tier}-Tier) | Очікувана фора: {fav_name} {fav_h}")
+                h1, h2 = handicap, -handicap
+                it1_raw = (total_expected - handicap) / 2
+                it2_raw = (total_expected + handicap) / 2
+
+            st.markdown("---")
+            st.subheader("📊 Match markets (Точні очікування)" if lang == "uk" else "📊 Match Markets (Exact Expectation)")
+            st.caption(f"Турнір: {current_league} | Клас: {tourney_tier}-Tier")
             
-            p_col1, p_col2, p_col3 = st.columns(3)
-            p_col1.metric(f"Очікувані кіли {team1}", f"{t1_expected_kills:.1f}")
-            p_col2.metric(f"Загальний Тотал (O/U)", f"{total_expected:.1f}")
-            p_col3.metric(f"Очікувані кіли {team2}", f"{t2_expected_kills:.1f}")
+            odds1 = 1 / t1_prob if t1_prob > 0 else 0
+            odds2 = 1 / t2_prob if t2_prob > 0 else 0
+
+            # Виводимо точні значення з двома знаками після коми
+            line_data = pd.DataFrame({
+                "Команда": [team1, team2],
+                "Победитель (КФ)": [f"{odds1:.2f}", f"{odds2:.2f}"],
+                "Очікувана Фора": [f"{h1:+.1f}", f"{h2:+.1f}"],
+                "МО Загальний Тотал": [f"{total_expected:.2f}", f"{total_expected:.2f}"],
+                "МО Інд. Тотал": [f"{it1_raw:.2f}", f"{it2_raw:.2f}"]
+            })
+            
+            st.dataframe(line_data, hide_index=True, use_container_width=True)
