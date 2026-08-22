@@ -18,9 +18,11 @@ else:
     # Залишаємо тільки командну статистику
     teams_df = df[df['position'] == 'team'].copy()
     
-    # Фільтри для вибірки даних (щоб аналізувати свіжі дані)
+    # Фільтри для вибірки даних
     st.sidebar.markdown("---")
     st.sidebar.subheader("⚙️ Налаштування вибірки" if lang == "uk" else "⚙️ Sample Settings")
+    
+    # 1. Турніри
     all_tournaments = sorted(teams_df['league'].dropna().unique().tolist())
     sel_tournaments = st.sidebar.multiselect(
         "Турніри:" if lang == "uk" else "Tournaments:", 
@@ -28,12 +30,30 @@ else:
         default=all_tournaments
     )
     
-    min_d, max_d = teams_df['date_only'].min(), teams_df['date_only'].max()
-    sel_dates = st.sidebar.date_input("Період:" if lang == "uk" else "Period:", value=(min_d, max_d))
-    s_date = e_date = sel_dates[0] if isinstance(sel_dates, (list, tuple)) else sel_dates
-    if isinstance(sel_dates, tuple) and len(sel_dates) == 2: s_date, e_date = sel_dates
+    # 2. Патчі (замість дат)
+    def patch_val(p):
+        parts = str(p).split('.')
+        try: return float(f"{parts[0]}.{int(parts[1]):03d}")
+        except: return 0
         
-    f_df = teams_df[(teams_df['league'].isin(sel_tournaments)) & (teams_df['date_only'] >= s_date) & (teams_df['date_only'] <= e_date)]
+    all_patches = sorted(teams_df['patch'].dropna().unique().tolist(), key=patch_val, reverse=True)
+    # За замовчуванням беремо 3 останні патчі
+    sel_patches = st.sidebar.multiselect(
+        "Патчі:" if lang == "uk" else "Patches:", 
+        options=all_patches, 
+        default=all_patches[:3] if len(all_patches) >= 3 else all_patches
+    )
+    
+    # 3. Ліміт останніх ігор
+    game_counts = [10, 15, 20, 25, 30, 35, 40, 45, 50, "Всі" if lang == "uk" else "All"]
+    sel_count = st.sidebar.selectbox(
+        "Аналізувати останні ігри:" if lang == "uk" else "Analyze last games:", 
+        options=game_counts, 
+        index=0 # За замовчуванням стоїть 10 ігор
+    )
+    
+    # Фільтруємо базу за турнірами та патчами
+    f_df = teams_df[(teams_df['league'].isin(sel_tournaments)) & (teams_df['patch'].isin(sel_patches))]
     
     teams_list = sorted(f_df['teamname'].dropna().unique().tolist())
     
@@ -45,9 +65,14 @@ else:
         with c1: team1 = st.selectbox("🔵 Команда 1" if lang == "uk" else "🔵 Team 1", options=teams_list, index=0)
         with c2: team2 = st.selectbox("🔴 Команда 2" if lang == "uk" else "🔴 Team 2", options=teams_list, index=1)
         
-        # Витягуємо статистику обох команд
-        t1_data = f_df[f_df['teamname'] == team1]
-        t2_data = f_df[f_df['teamname'] == team2]
+        # Витягуємо статистику обох команд і СОРТУЄМО від найсвіжіших ігор до найстаріших
+        t1_data = f_df[f_df['teamname'] == team1].sort_values(by='parsed_datetime', ascending=False)
+        t2_data = f_df[f_df['teamname'] == team2].sort_values(by='parsed_datetime', ascending=False)
+        
+        # Застосовуємо ліміт (залишаємо тільки N найсвіжіших ігор для кожної команди)
+        if sel_count not in ["Всі", "All"]:
+            t1_data = t1_data.head(sel_count)
+            t2_data = t2_data.head(sel_count)
         
         if not t1_data.empty and not t2_data.empty:
             
