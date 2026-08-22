@@ -29,7 +29,8 @@ lang_choice = st.sidebar.radio("Language", ["Українська", "English"], 
 lang = "uk" if lang_choice == "Українська" else "en"
 t = TRANSLATIONS[lang]
 
-DEFAULT_GDRIVE_LINK = "https://oracleselixir-downloadable-match-data.s3-us-west-2.amazonaws.com/2026_LoL_esports_match_data_from_OraclesElixir.csv"
+# Замість URL просто вказуємо назву файлу, який лежить поруч із app.py
+DEFAULT_GDRIVE_LINK = "2026_LoL_esports_match_data_from_OraclesElixir.csv"
 if 'sheet_url' not in st.session_state: st.session_state['sheet_url'] = "https://docs.google.com/spreadsheets/d/1kjn9qTW1tgMNtqRwYCg0bQBWvjC9pJ6K-LZ6-G2o274/edit?gid=0#gid=0"
 if 'sheet_name' not in st.session_state: st.session_state['sheet_name'] = "Sheets1"
 if 'df' not in st.session_state: st.session_state['df'] = None
