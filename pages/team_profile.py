@@ -123,10 +123,13 @@ else:
                 return res if not pd.isna(res) else 0
 
             def calc_line(mo):
-                """Знаходить найближчу половинчасту лінію (.5)"""
-                l = round(mo * 2) / 2
-                if l % 1 == 0: l -= 0.5
-                return max(0.5, l)
+                """Знаходить лінію (.5), яка є найближчою до МО (найближче до 50% ймовірності)"""
+                if mo >= 0:
+                    l = math.floor(mo) + 0.5
+                else:
+                    l = math.ceil(mo) - 0.5
+                # Тотал не може бути від'ємним або нульовим
+                return max(0.5, l) if mo >= 0 else l
 
             # Константи розкиду ліній
             SIGMA_HDP = 37.0
@@ -142,7 +145,7 @@ else:
             tier_multiplier = get_tier_multiplier(current_league)
             
             st.markdown("---")
-            st.subheader("⚙️ Настройки мат. модели" if lang == "uk" else "⚙️ Math Model Settings")
+            st.subheader("⚙️ Налаштування мат. моделі" if lang == "uk" else "⚙️ Math Model Settings")
             
             in_c1, in_c2, in_c3 = st.columns([1, 1, 2])
             with in_c1:
@@ -176,10 +179,11 @@ else:
             mo_inh = get_obj_mo(t1_data, t2_data, 'inhibitors', 'opp_inhibitors')
             if mo_inh == 0: mo_inh = 1.5
 
-            # --- 3. ВИЗНАЧЕННЯ НОМІНАЛЬНИХ ЛІНІЙ (.5) ---
+            # --- 3. ВИЗНАЧЕННЯ НОМІНАЛЬНИХ ЛІНІЙ (НАЙБЛИЖЧИХ ДО 50%) ---
             raw_h1 = -mu_diff 
-            base_h1 = calc_line(raw_h1 + 0.5) if raw_h1 >= 0 else calc_line(raw_h1 - 0.5) # коригування для фор
-            if base_h1 == 0: base_h1 = -0.5
+            base_h1 = calc_line(raw_h1)
+            # Якщо матч ідеально рівний (0), даємо номінальну фору -0.5 для першої команди
+            if raw_h1 == 0: base_h1 = -0.5 
             base_h2 = -base_h1
             
             base_t = calc_line(raw_total)
