@@ -231,6 +231,105 @@ if df is not None:
         # ... ТУТ МАЄ БУТИ ВВЕСЬ ТВІЙ СТАРИЙ КОД ФІЛЬТРАЦІЇ ...
         # (від вибору дат до кнопки "Відправити в Google Sheets")
         # Просто переконайся, що він має відступ всередині блоку `with tab1:`
+        # 2. Календар за датами
+        min_date = df['date_only'].min()
+        max_date = df['date_only'].max()
+        selected_date_range = st.sidebar.date_input(
+            "📅 Діапазон дат:",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date
+        )
+        
+        if isinstance(selected_date_range, tuple) and len(selected_date_range) == 2:
+            start_date, end_date = selected_date_range
+        else:
+            start_date = end_date = selected_date_range[0] if isinstance(selected_date_range, (list, tuple)) else selected_date_range
+            
+        # Фільтрація
+        filtered_df = df[
+            (df['league'].isin(selected_tournaments)) &
+            (df['date_only'] >= start_date) &
+            (df['date_only'] <= end_date)
+        ]
+        
+        if filtered_df.empty:
+                st.warning("⚠️ За обраними фільтрами (турніри / дати) матчів не знайдено.")
+        else:
+            # === БЛОК ГРУПУВАННЯ МАТЧІВ (СЕРІЙ) ===
+            series_info = {}
+            
+            for game_id, g in filtered_df.groupby('gameid'):
+                # Беремо назви обох команд і сортуємо їх за алфавітом
+                teams = sorted(g['teamname'].dropna().unique().tolist())
+                team_display = f"{teams[0]} vs {teams[1]}" if len(teams) == 2 else " vs ".join(teams)
+                
+                league_name = g['league'].iloc[0]
+                game_date = g['date_only'].iloc[0]
+                
+                # Створюємо унікальний ключ для серії (матчу)
+                series_key = f"{game_date}_{league_name}_{team_display}"
+                
+                if series_key not in series_info:
+                    series_info[series_key] = {
+                        'display_name': f"{game_date} | [{league_name}] {team_display}",
+                        'game_ids': []
+                    }
+                    
+                # Додаємо ID карти до загального списку карт цієї серії
+                series_info[series_key]['game_ids'].append(game_id)
+                
+            # Додаємо кількість зіграних карт до назви в меню
+            display_options = {}
+            for s_key, info in series_info.items():
+                map_count = len(info['game_ids'])
+                display_options[s_key] = f"{info['display_name']} ({map_count} карт)"
+    
+            # 3. Множинний вибір матчів
+            st.subheader("⚔️ Вибір матчів")
+            selected_series_keys = st.multiselect(
+                "Оберіть один або декілька матчів (усі карти підтягнуться автоматично):",
+                options=list(display_options.keys()),
+                format_func=lambda x: display_options[x],
+                default=list(display_options.keys())[:3] if len(display_options) >= 3 else list(display_options.keys())
+            )
+            
+            if selected_series_keys:
+                # Збираємо всі gameid (карти), що входять у вибрані матчі
+                selected_match_ids = []
+                for s_key in selected_series_keys:
+                    selected_match_ids.extend(series_info[s_key]['game_ids'])
+                    
+                # Фільтруємо датафрейм за всіма знайденими картами
+                selected_games_df = filtered_df[filtered_df['gameid'].isin(selected_match_ids)]
+                
+                # Парсимо дані
+                parsed_maps_rows = parse_selected_games(selected_games_df)
+                parsed_df = pd.DataFrame(parsed_maps_rows)
+                
+                st.subheader(f"📊 Згенерована таблиця карт ({len(parsed_df)} карт(и))")
+                st.dataframe(parsed_df)
+                
+                st.markdown("---")
+                st.subheader("📤 Експорт у Google Sheets")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.session_state['sheet_url'] = st.text_input("URL Google Таблиці:", value=st.session_state['sheet_url'])
+                with col2:
+                    st.session_state['sheet_name'] = st.text_input("Назва аркуша:", value=st.session_state['sheet_name'])
+                    
+                if st.button("🚀 Відправити в Google Sheets"):
+                    with st.spinner("Запис даних у Google Таблицю..."):
+                        success, message = append_to_sheet(
+                            st.session_state['sheet_url'], 
+                            st.session_state['sheet_name'], 
+                            parsed_maps_rows
+                        )
+                        if success:
+                            st.success(message)
+                        else:
+                            st.error(message)
 
 
     # ==========================================
