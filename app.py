@@ -323,12 +323,21 @@ else:
         if not teams_list:
             st.warning(t["no_players"])
         else:
+            # Визначаємо сортування патчів вище, щоб використати їх для default значень
+            def patch_val(p):
+                parts = p.split('.')
+                try: return float(f"{parts[0]}.{int(parts[1]):03d}")
+                except: return 0
+                
+            all_patches = sorted(players_df['patch'].unique().tolist())
+            last_2_patches = sorted(all_patches, key=patch_val, reverse=True)[:2]
+
             f_col1, f_col2 = st.columns(2)
             with f_col1:
                 sel_dates = st.date_input(t["stat_period"], value=(players_df['date_only'].min(), players_df['date_only'].max()), key="t2_dates")
             with f_col2:
-                all_patches = sorted(players_df['patch'].unique().tolist())
-                sel_patches = st.multiselect(t["patches"], options=all_patches, default=all_patches, key="t2_patches")
+                # Встановлюємо default=last_2_patches
+                sel_patches = st.multiselect(t["patches"], options=all_patches, default=last_2_patches, key="t2_patches")
             
             s_date = e_date = sel_dates[0] if isinstance(sel_dates, (list, tuple)) else sel_dates
             if isinstance(sel_dates, tuple) and len(sel_dates) == 2:
