@@ -3,9 +3,7 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import re
-import gdown
 import os
-import tempfile
 
 st.set_page_config(page_title="LoL Esports Auto-Exporter", layout="wide")
 
@@ -13,8 +11,8 @@ st.set_page_config(page_title="LoL Esports Auto-Exporter", layout="wide")
 # ⚙️ НАЛАШТУВАННЯ ЗА ЗАМОВЧУВАННЯМ
 # ==========================================
 # Ваше посилання на файл у Google Диску
-DEFAULT_GDRIVE_LINK = "https://drive.google.com/file/d/1hnpbrUpBMS1TZI7IovfpKeZfWJH1Aptm/view?usp=sharing"
-
+# Замінюємо Google Drive на прямий сервер Oracle's Elixir
+DEFAULT_GDRIVE_LINK = "https://oracleselixir-downloadable-match-data.s3-us-west-2.amazonaws.com/2026_LoL_esports_match_data_from_OraclesElixir.csv"
 # Вставте ваші сталі дані Google Таблиці
 DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1kjn9qTW1tgMNtqRwYCg0bQBWvjC9pJ6K-LZ6-G2o274/edit?gid=0#gid=0"
 DEFAULT_SHEET_NAME = "Sheets1"
@@ -172,28 +170,10 @@ def parse_selected_games(df_games):
             
     return parsed_rows
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=3600)  # Збільшуємо кеш до 1 години
 def load_and_process_csv(source_input):
-    if isinstance(source_input, str) and "drive.google.com" in source_input:
-        # Витягуємо ID файлу з посилання
-        match = re.search(r'/d/([a-zA-Z0-9_-]+)', source_input)
-        if not match:
-            raise ValueError("Не вдалося знайти ID файлу у посиланні.")
-            
-        file_id = match.group(1)
-        
-        # Створюємо шлях для тимчасового файлу на сервері
-        temp_dir = tempfile.gettempdir()
-        temp_path = os.path.join(temp_dir, 'lol_data.csv')
-        
-        # Завантажуємо файл через gdown (обходить перевірку на віруси)
-        gdown.download(id=file_id, output=temp_path, quiet=False)
-        
-        # Зчитуємо завантажений файл
-        data = pd.read_csv(temp_path, low_memory=False)
-    else:
-        # Завантаження локального файлу (через віджет)
-        data = pd.read_csv(source_input, low_memory=False)
+    # Pandas вміє сам завантажувати CSV за прямим URL!
+    data = pd.read_csv(source_input, low_memory=False)
         
     # Перевірка наявності потрібної колонки
     if 'position' not in data.columns:
