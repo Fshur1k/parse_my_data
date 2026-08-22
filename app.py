@@ -272,9 +272,9 @@ if df is not None:
         (df['date_only'] <= end_date)
     ]
     
-if filtered_df.empty:
-        st.warning("⚠️ За обраними фільтрами (турніри / дати) матчів не знайдено.")
-else:
+    if filtered_df.empty:
+            st.warning("⚠️ За обраними фільтрами (турніри / дати) матчів не знайдено.")
+    else:
         # === БЛОК ГРУПУВАННЯ МАТЧІВ (СЕРІЙ) ===
         series_info = {}
         
