@@ -3,9 +3,9 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import re
-import requests
-import io
-import re
+import gdown
+import os
+import tempfile
 
 st.set_page_config(page_title="LoL Esports Auto-Exporter", layout="wide")
 
@@ -181,30 +181,21 @@ def load_and_process_csv(source_input):
             raise ValueError("Не вдалося знайти ID файлу у посиланні.")
             
         file_id = match.group(1)
-        url = "https://docs.google.com/uc?export=download"
         
-        # Використовуємо сесію для роботи з cookies
-        session = requests.Session()
-        response = session.get(url, params={'id': file_id}, stream=True)
+        # Створюємо шлях для тимчасового файлу на сервері
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, 'lol_data.csv')
         
-        # Шукаємо токен підтвердження для великих файлів (> 25MB)
-        token = None
-        for key, value in response.cookies.items():
-            if key.startswith('download_warning'):
-                token = value
-                break
-                
-        # Якщо є токен, робимо повторний запит з ним
-        if token:
-            response = session.get(url, params={'id': file_id, 'confirm': token}, stream=True)
-            
-        response.encoding = 'utf-8'
-        data = pd.read_csv(io.StringIO(response.text), low_memory=False)
+        # Завантажуємо файл через gdown (обходить перевірку на віруси)
+        gdown.download(id=file_id, output=temp_path, quiet=False)
+        
+        # Зчитуємо завантажений файл
+        data = pd.read_csv(temp_path, low_memory=False)
     else:
-        # Завантаження локального файлу
+        # Завантаження локального файлу (через віджет)
         data = pd.read_csv(source_input, low_memory=False)
         
-    # Перевірка наявності потрібної колонки для уникнення прихованих помилок
+    # Перевірка наявності потрібної колонки
     if 'position' not in data.columns:
         raise KeyError("Колонку 'position' не знайдено. Перевір формат отриманого файлу.")
         
