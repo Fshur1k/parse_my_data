@@ -16,8 +16,8 @@ st.set_page_config(page_title="LoL Esports Auto-Exporter", layout="wide")
 DEFAULT_GDRIVE_LINK = "https://drive.google.com/file/d/1hnpbrUpBMS1TZI7IovfpKeZfWJH1Aptm/view?usp=sharing"
 
 # Вставте ваші сталі дані Google Таблиці
-DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/ВАШ_SPREADSHEET_ID/edit"
-DEFAULT_SHEET_NAME = "Sheet1"
+DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1kjn9qTW1tgMNtqRwYCg0bQBWvjC9pJ6K-LZ6-G2o274/edit?gid=0#gid=0"
+DEFAULT_SHEET_NAME = "Sheets1"
 
 # Ініціалізація стану сесії, щоб URL та назва аркуша не зникали при взаємодії
 if 'sheet_url' not in st.session_state:
