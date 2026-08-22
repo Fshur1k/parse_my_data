@@ -214,9 +214,7 @@ if df is not None:
     # Вкладка 1: Експортер (Командна статистика)
     # ==========================================
     with tab1:
-        # Для 1-ї вкладки виділяємо ТІЛЬКИ команди (як було раніше)
         teams_df = df[df['position'] == 'team'].copy()
-        
         all_tournaments = sorted(teams_df['league'].dropna().unique().tolist())
         selected_tournaments = st.multiselect(
             "🏆 Оберіть турнір(и):", 
@@ -294,12 +292,9 @@ if df is not None:
                         else: st.error(message)
 
     # ==========================================
-    # Вкладка 2: Калькулятор Піків (Вінрейт + Графік)
+    # Вкладка 2: Компактний Калькулятор Піків
     # ==========================================
     with tab2:
-        st.header("🧮 Аналіз піків та гравців")
-        
-        # Для 2-ї вкладки беремо лише гравців
         players_df = df[df['position'] != 'team'].copy()
         players_df['patch'] = players_df['patch'].astype(str).str.replace(',', '.')
         
@@ -307,102 +302,112 @@ if df is not None:
         champs_list = sorted(players_df['champion'].dropna().unique().tolist())
         
         if not teams_list:
-            st.warning("Дані по гравцях відсутні (або файл їх не містить).")
+            st.warning("Дані по гравцях відсутні.")
         else:
-            col1, col2, col3 = st.columns([1.2, 1.2, 1.5])
+            # Фільтри для статистики калькулятора
+            f_col1, f_col2 = st.columns(2)
+            with f_col1:
+                min_dp = players_df['date_only'].min()
+                max_dp = players_df['date_only'].max()
+                sel_dates = st.date_input("📅 Період статистики:", value=(min_dp, max_dp), key="t2_dates")
+            with f_col2:
+                all_patches = sorted(players_df['patch'].unique().tolist())
+                sel_patches = st.multiselect("🔢 Патчі для аналізу:", options=all_patches, default=all_patches, key="t2_patches")
             
-            def get_roster(team_name):
-                roster = {}
-                team_data = players_df[players_df['teamname'] == team_name]
-                for role in ['top', 'jng', 'mid', 'bot', 'sup']:
-                    r_data = team_data[team_data['position'] == role]
-                    if not r_data.empty:
-                        roster[role] = r_data['playername'].value_counts().index[0]
-                    else:
-                        roster[role] = "Невідомо"
-                return roster
+            if isinstance(sel_dates, tuple) and len(sel_dates) == 2:
+                s_date, e_date = sel_dates
+            else:
+                s_date = e_date = sel_dates[0] if isinstance(sel_dates, (list, tuple)) else sel_dates
+                
+            filtered_players = players_df[
+                (players_df['date_only'] >= s_date) &
+                (players_df['date_only'] <= e_date) &
+                (players_df['patch'].isin(sel_patches))
+            ]
+            
+            st.markdown("---")
+            col1, col2, col3 = st.columns([1.5, 1.5, 1.2])
+            
+            # --- Логіка знаходження найновіших 2 патчів для складу за замовчуванням ---
+            def patch_val(p):
+                parts = p.split('.')
+                try: return float(f"{parts[0]}.{int(parts[1]):03d}")
+                except: return 0
+                
+            last_2_patches = sorted(all_patches, key=patch_val, reverse=True)[:2]
+
+            def get_team_players(team_name, role):
+                team_role_df = players_df[(players_df['teamname'] == team_name) & (players_df['position'] == role)]
+                if team_role_df.empty: return ["Невідомо"], 0
+                
+                all_p = team_role_df['playername'].unique().tolist()
+                recent_df = team_role_df[team_role_df['patch'].isin(last_2_patches)]
+                
+                default_p = recent_df['playername'].value_counts().index[0] if not recent_df.empty else team_role_df['playername'].value_counts().index[0]
+                return all_p, (all_p.index(default_p) if default_p in all_p else 0)
 
             def get_stats(player_name, champ_name):
-                """Повертає Середні кіли, Медіану кілів, Відсоток перемог (Вінрейт) та Джерело"""
-                if not champ_name or champ_name == "None":
-                    return 0, 0, 0, ""
-                
-                p_data = players_df[(players_df['playername'] == player_name) & (players_df['champion'] == champ_name)]
+                if not champ_name or champ_name == "None": return 0, 0, 0, ""
+                p_data = filtered_players[(filtered_players['playername'] == player_name) & (filtered_players['champion'] == champ_name)]
                 
                 if not p_data.empty:
-                    wr = p_data['result'].mean() * 100
-                    return p_data['kills'].mean(), p_data['kills'].median(), wr, "Статистика гравця"
+                    return p_data['kills'].mean(), p_data['kills'].median(), p_data['result'].mean()*100, "Гравця"
                 
-                c_data = players_df[players_df['champion'] == champ_name]
+                c_data = filtered_players[filtered_players['champion'] == champ_name]
                 if not c_data.empty:
-                    wr = c_data['result'].mean() * 100
-                    return c_data['kills'].mean(), c_data['kills'].median(), wr, "В середньому по лізі"
+                    return c_data['kills'].mean(), c_data['kills'].median(), c_data['result'].mean()*100, "Ліги"
                 
-                return 0, 0, 0, "Немає даних"
+                return 0, 0, 0, "-"
 
             roles_display = {'top': 'Top', 'jng': 'Jungle', 'mid': 'Mid', 'bot': 'ADC', 'sup': 'Support'}
+            t1_total_kills, t2_total_kills = 0.0, 0.0
             selected_draft_champs = []
 
+            # --- КОМАНДА 1 ---
             with col1:
-                st.subheader("🔵 Синя команда")
-                team1 = st.selectbox("Оберіть команду 1", options=teams_list, index=0, key="t1")
-                roster1 = get_roster(team1)
-                
+                team1 = st.selectbox("Команда 1", options=teams_list, index=0, key="t1")
+                st.markdown("---")
                 for role, role_name in roles_display.items():
-                    st.markdown(f"**{role_name}** | {roster1[role]}")
-                    champ = st.selectbox(f"Пік", ["None"] + champs_list, key=f"t1_{role}")
+                    p_list, p_idx = get_team_players(team1, role)
+                    c_p, c_c = st.columns(2)
+                    player = c_p.selectbox(f"{role_name}", options=p_list, index=p_idx, key=f"t1_p_{role}")
+                    champ = c_c.selectbox(f"Пік", options=["None"] + champs_list, key=f"t1_c_{role}")
                     
                     if champ != "None":
                         selected_draft_champs.append(champ)
-                        mean_k, med_k, wr, source = get_stats(roster1[role], champ)
-                        msg = f"Кіли (сер/мед): **{mean_k:.1f} / {med_k:.1f}** | WR: **{wr:.0f}%**"
-                        
-                        if source == "Статистика гравця": st.success(msg)
-                        else: st.warning(msg + f" \n*(По лізі)*")
-                    st.write("---")
+                        mean_k, med_k, wr, source = get_stats(player, champ)
+                        t1_total_kills += mean_k
+                        st.caption(f"🎯 **{mean_k:.1f}** кілів | WR: **{wr:.0f}%** ({source})")
 
+            # --- КОМАНДА 2 ---
             with col2:
-                st.subheader("🔴 Червона команда")
-                t2_idx = 1 if len(teams_list) > 1 else 0
-                team2 = st.selectbox("Оберіть команду 2", options=teams_list, index=t2_idx, key="t2")
-                roster2 = get_roster(team2)
-                
+                team2 = st.selectbox("Команда 2", options=teams_list, index=1 if len(teams_list)>1 else 0, key="t2")
+                st.markdown("---")
                 for role, role_name in roles_display.items():
-                    st.markdown(f"**{role_name}** | {roster2[role]}")
-                    champ = st.selectbox(f"Пік", ["None"] + champs_list, key=f"t2_{role}")
+                    p_list, p_idx = get_team_players(team2, role)
+                    c_p, c_c = st.columns(2)
+                    player = c_p.selectbox(f"{role_name}", options=p_list, index=p_idx, key=f"t2_p_{role}")
+                    champ = c_c.selectbox(f"Пік", options=["None"] + champs_list, key=f"t2_c_{role}")
                     
                     if champ != "None":
                         selected_draft_champs.append(champ)
-                        mean_k, med_k, wr, source = get_stats(roster2[role], champ)
-                        msg = f"Кіли (сер/мед): **{mean_k:.1f} / {med_k:.1f}** | WR: **{wr:.0f}%**"
-                        
-                        if source == "Статистика гравця": st.success(msg)
-                        else: st.warning(msg + f" \n*(По лізі)*")
-                    st.write("---")
+                        mean_k, med_k, wr, source = get_stats(player, champ)
+                        t2_total_kills += mean_k
+                        st.caption(f"🎯 **{mean_k:.1f}** кілів | WR: **{wr:.0f}%** ({source})")
 
+            # --- ДАШБОРД (Колонка 3) ---
             with col3:
-                st.subheader("📈 Тренд кілів (всі піки)")
+                st.subheader("📊 Аналіз драфту")
+                st.metric(f"Теоретичні кіли: {team1}", f"{t1_total_kills:.1f}")
+                st.metric(f"Теоретичні кіли: {team2}", f"{t2_total_kills:.1f}")
                 
-                # Відкидаємо дублікати і "None"
                 unique_champs = list(set([c for c in selected_draft_champs if c != "None"]))
-                
                 if unique_champs:
-                    st.write(f"Герої на графіку: **{', '.join(unique_champs)}**")
-                    
-                    # Фільтруємо дані тільки по обраних героях
-                    champ_trend_data = players_df[players_df['champion'].isin(unique_champs)]
-                    
+                    champ_trend_data = filtered_players[filtered_players['champion'].isin(unique_champs)]
                     if not champ_trend_data.empty:
-                        # Групуємо і перетворюємо таблицю для графіка (Патч -> Герой 1, Герой 2...)
                         trend_grouped = champ_trend_data.groupby(['patch', 'champion'])['kills'].mean().reset_index()
                         pivot_trend = trend_grouped.pivot(index='patch', columns='champion', values='kills')
-                        
-                        # Сортуємо патчі
-                        pivot_trend = pivot_trend.sort_index()
+                        pivot_trend.index = sorted(pivot_trend.index, key=patch_val)
                         
                         st.line_chart(pivot_trend)
-                        st.caption("Середня кількість кілів для кожного обраного героя залежно від патчу.")
-                    else:
-                        st.info("Немає даних по патчах для цих героїв.")
-                else:
-                    st.info("Оберіть хоча б одного героя зліва для порівняння.")
+                        st.caption("Тренд середніх кілів по патчах.")
