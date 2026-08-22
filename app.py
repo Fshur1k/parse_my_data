@@ -171,13 +171,19 @@ def parse_selected_games(df_games):
     return parsed_rows
 
 @st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def load_and_process_csv(source_input):
+    # Pandas вміє сам завантажувати CSV за прямим URL!
     data = pd.read_csv(source_input, low_memory=False)
         
+    # Перевірка наявності потрібної колонки
     if 'position' not in data.columns:
         raise KeyError("Колонку 'position' не знайдено. Перевір формат отриманого файлу.")
         
-    # БІЛЬШЕ НЕ ВИДАЛЯЄМО ГРАВЦІВ ТУТ! Парсимо дати для всього файлу
+    # ДЕФРАГМЕНТАЦІЯ ПАМ'ЯТІ (вирішує проблему падіння апки і PerformanceWarning)
+    data = data.copy()
+    
+    # Парсинг дати
     data['parsed_datetime'] = pd.to_datetime(data['date'], errors='coerce')
     data['date_only'] = data['parsed_datetime'].dt.date
     
@@ -407,7 +413,12 @@ if df is not None:
                     if not champ_trend_data.empty:
                         trend_grouped = champ_trend_data.groupby(['patch', 'champion'])['kills'].mean().reset_index()
                         pivot_trend = trend_grouped.pivot(index='patch', columns='champion', values='kills')
-                        pivot_trend.index = sorted(pivot_trend.index, key=patch_val)
+                        
+                        # Правильне сортування графіку по патчах (як по числах)
+                        pivot_trend = pivot_trend.reset_index()
+                        pivot_trend['sort_val'] = pivot_trend['patch'].apply(patch_val)
+                        pivot_trend = pivot_trend.sort_values('sort_val').drop(columns=['sort_val'])
+                        pivot_trend = pivot_trend.set_index('patch')
                         
                         st.line_chart(pivot_trend)
                         st.caption("Тренд середніх кілів по патчах.")
