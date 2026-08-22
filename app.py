@@ -36,9 +36,11 @@ def convert_gdrive_url(url: str) -> str:
         return f'https://drive.google.com/uc?export=download&id={file_id}'
     return url
 
-def get_gspread_client(credentials_file='credentials.json'):
+def get_gspread_client():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_name(credentials_file, scope)
+    # Беремо дані не з файлу, а зі схованого середовища Streamlit Secrets
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
 def append_to_sheet(spreadsheet_url, sheet_name, data_rows):
