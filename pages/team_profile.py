@@ -80,9 +80,9 @@ else:
             # --- ОНОВЛЕНА МАТЕМАТИЧНА МОДЕЛЬ (BOOKMAKER MODEL) ---
             def get_tier_multiplier(league):
                 l = str(league).upper()
-                if l in ['LCK', 'LPL', 'LEC', 'MSI', 'WCS']: return 15.0 # S-Tier
-                if l in ['LCS', 'CBLOL', 'PCS', 'VCS', 'LLA', 'LJL', 'EMEA MASTERS']: return 17.5 # A-Tier
-                return 19.0 # B-Tier
+                if l in ['LCK', 'LPL', 'LEC', 'MSI', 'WCS']: return 15.0 
+                if l in ['LCS', 'CBLOL', 'PCS', 'VCS', 'LLA', 'LJL', 'EMEA MASTERS']: return 17.5
+                return 19.0 
                 
             def norm_cdf(x, mu, sigma):
                 return 0.5 * (1 + math.erf((x - mu) / (sigma * math.sqrt(2))))
@@ -97,14 +97,11 @@ else:
 
             def get_hdp_odds(h1, mu_diff, t1_win_prob, t2_win_prob, sigma_hdp=37.0, margin=0.075):
                 """Розрахунок коефіцієнтів для фор із запобіжником на чисту перемогу"""
-                # Ймовірність за нормальним розподілом
                 p_t1 = 1.0 - norm_cdf(-h1, mu=mu_diff, sigma=sigma_hdp)
                 p_t2 = 1.0 - p_t1
                 
-                # Букмекерський запобіжник: 
-                # Якщо фора мінусова (фаворит), ймовірність її пробиття не може бути вищою за ймовірність просто виграти
                 if h1 < 0: p_t1 = min(p_t1, t1_win_prob)
-                elif h1 > 0: p_t1 = max(p_t1, t1_win_prob) # плюсова фора має заходити частіше ніж чиста перемога
+                elif h1 > 0: p_t1 = max(p_t1, t1_win_prob) 
                 
                 h2 = -h1
                 if h2 < 0: p_t2 = min(p_t2, t2_win_prob)
@@ -114,10 +111,31 @@ else:
                 o2 = round(1 / (p_t2 * (1 + margin)), 2) if p_t2 > 0 else 0
                 return o1, o2
 
+            def get_obj_mo(df1, df2, col, opp_col):
+                """Обчислює очікуваний загальний тотал макро-об'єктів для матчу"""
+                if opp_col in df1.columns:
+                    t1_tot = (pd.to_numeric(df1[col], errors='coerce') + pd.to_numeric(df1[opp_col], errors='coerce')).median()
+                    t2_tot = (pd.to_numeric(df2[col], errors='coerce') + pd.to_numeric(df2[opp_col], errors='coerce')).median()
+                    res = (t1_tot + t2_tot) / 2
+                else:
+                    # Якщо немає даних про суперника, просто сумуємо середні показники обох команд
+                    res = pd.to_numeric(df1[col], errors='coerce').median() + pd.to_numeric(df2[col], errors='coerce').median()
+                return res if not pd.isna(res) else 0
+
+            def calc_line(mo):
+                """Знаходить найближчу половинчасту лінію (.5)"""
+                l = round(mo * 2) / 2
+                if l % 1 == 0: l -= 0.5
+                return max(0.5, l)
+
             # Константи розкиду ліній
             SIGMA_HDP = 37.0
             SIGMA_TOT = 9.0
             SIGMA_IT = 6.0
+            SIGMA_TOWERS = 2.5
+            SIGMA_DRAGONS = 1.2
+            SIGMA_BARONS = 0.8
+            SIGMA_INHIBS = 1.0
 
             # --- ІНТЕРФЕЙС ТА ЛОГІКА ---
             current_league = f_df['league'].iloc[0]
@@ -136,43 +154,46 @@ else:
             t1_prob = t1_base / 100.0
             t2_prob = t2_base / 100.0
             
-            # --- 1. РОЗРАХУНОК ОЧІКУВАНЬ (МО) ---
+            # --- 1. РОЗРАХУНОК ОЧІКУВАНЬ КІЛІВ (МО) ---
             t1_median_total = (t1_data['kills'] + t1_data['deaths']).median()
             t2_median_total = (t2_data['kills'] + t2_data['deaths']).median()
             raw_total = (t1_median_total + t2_median_total) / 2
             
             p_fav = t1_prob if t1_prob >= 0.5 else t2_prob
             diff_magnitude = tier_multiplier * math.sqrt(p_fav - 0.5)
-            
-            # Різниця вбивств (T1 - T2). Якщо T1 фаворит, різниця додатна.
             mu_diff = diff_magnitude if t1_prob >= 0.5 else -diff_magnitude
             
             it1_raw = (raw_total + mu_diff) / 2
             it2_raw = (raw_total - mu_diff) / 2
 
-            # --- 2. ВИЗНАЧЕННЯ НОМІНАЛЬНИХ ЛІНІЙ (.5) ---
-            # Якщо mu_diff додатне (Команда 1 фаворит), її базова фора має бути від'ємною
+            # --- 2. РОЗРАХУНОК ОЧІКУВАНЬ ОБ'ЄКТІВ (МАКРО) ---
+            mo_tow = get_obj_mo(t1_data, t2_data, 'towers', 'opp_towers')
+            if mo_tow == 0: mo_tow = 12.5 # Fallback
+            mo_drag = get_obj_mo(t1_data, t2_data, 'dragons', 'opp_dragons')
+            if mo_drag == 0: mo_drag = 4.5
+            mo_bar = get_obj_mo(t1_data, t2_data, 'barons', 'opp_barons')
+            if mo_bar == 0: mo_bar = 1.5
+            mo_inh = get_obj_mo(t1_data, t2_data, 'inhibitors', 'opp_inhibitors')
+            if mo_inh == 0: mo_inh = 1.5
+
+            # --- 3. ВИЗНАЧЕННЯ НОМІНАЛЬНИХ ЛІНІЙ (.5) ---
             raw_h1 = -mu_diff 
-            base_h1 = round(raw_h1 * 2) / 2
-            if base_h1 % 1 == 0:
-                base_h1 = base_h1 - 0.5 if base_h1 > 0 else base_h1 + 0.5
-            # Якщо матч ідеально рівний
+            base_h1 = calc_line(raw_h1 + 0.5) if raw_h1 >= 0 else calc_line(raw_h1 - 0.5) # коригування для фор
             if base_h1 == 0: base_h1 = -0.5
-            
             base_h2 = -base_h1
             
-            base_t = round(raw_total * 2) / 2
-            if base_t % 1 == 0: base_t -= 0.5
+            base_t = calc_line(raw_total)
+            base_it1 = calc_line(it1_raw)
+            base_it2 = calc_line(it2_raw)
             
-            base_it1 = round(it1_raw * 2) / 2
-            if base_it1 % 1 == 0: base_it1 -= 0.5
-            
-            base_it2 = round(it2_raw * 2) / 2
-            if base_it2 % 1 == 0: base_it2 -= 0.5
+            l_tow = calc_line(mo_tow)
+            l_drag = calc_line(mo_drag)
+            l_bar = calc_line(mo_bar)
+            l_inh = calc_line(mo_inh)
 
-            # --- 3. ГЕНЕРАЦІЯ БУКМЕКЕРСЬКОЇ ТАБЛИЦІ (MAIN MARKET) ---
+            # --- 4. ГЕНЕРАЦІЯ БУКМЕКЕРСЬКОЇ ТАБЛИЦІ (MAIN MARKET) ---
             st.markdown("---")
-            st.subheader("📊 Main markets (Основна лінія)" if lang == "uk" else "📊 Main Markets")
+            st.subheader("📊 Main markets (Кіли)" if lang == "uk" else "📊 Main Markets (Kills)")
             st.caption(f"Турнір: {current_league} | Очікувана різниця: {mu_diff:+.2f} кілів | Маржа: 7.5%")
             
             odds1 = round(1 / (t1_prob * (1 + 0.075)), 2) if t1_prob > 0 else 0
@@ -198,13 +219,32 @@ else:
             
             st.dataframe(line_data, hide_index=True, use_container_width=True)
 
-            # --- 4. РОЗШИРЕНИЙ РОЗПИС (АЛЬТЕРНАТИВНІ ЛІНІЇ) ---
+            # --- 5. МАКРО-ОБ'ЄКТИ (НОВА ТАБЛИЦЯ) ---
+            st.markdown("---")
+            st.subheader("🏰 Макро-об'єкти (Тотали)" if lang == "uk" else "🏰 Macro Objectives (Totals)")
+            st.caption("Аналіз очікуваної кількості зруйнованих/вбитих об'єктів за матч" if lang == "uk" else "Analysis of expected destroyed/killed objectives per match")
+            
+            o_tow, u_tow = get_markets(l_tow, mo_tow, SIGMA_TOWERS)
+            o_drag, u_drag = get_markets(l_drag, mo_drag, SIGMA_DRAGONS)
+            o_bar, u_bar = get_markets(l_bar, mo_bar, SIGMA_BARONS)
+            o_inh, u_inh = get_markets(l_inh, mo_inh, SIGMA_INHIBS)
+
+            obj_data = pd.DataFrame({
+                "Об'єкт" if lang == "uk" else "Objective": ["🗼 Вежі (Towers)", "🐉 Дракони (Dragons)", "👾 Нашори (Barons)", "🛑 Інгібітори (Inhibs)"],
+                "МО (Очікування)" if lang == "uk" else "Expected (MO)": [f"{mo_tow:.2f}", f"{mo_drag:.2f}", f"{mo_bar:.2f}", f"{mo_inh:.2f}"],
+                "Лінія" if lang == "uk" else "Line": [f"{l_tow}", f"{l_drag}", f"{l_bar}", f"{l_inh}"],
+                "Більше" if lang == "uk" else "Over": [f"{o_tow:.2f}", f"{o_drag:.2f}", f"{o_bar:.2f}", f"{o_inh:.2f}"],
+                "Менше" if lang == "uk" else "Under": [f"{u_tow:.2f}", f"{u_drag:.2f}", f"{u_bar:.2f}", f"{u_inh:.2f}"]
+            })
+            
+            st.dataframe(obj_data, hide_index=True, use_container_width=True)
+
+            # --- 6. РОЗШИРЕНИЙ РОЗПИС (АЛЬТЕРНАТИВНІ ЛІНІЇ КІЛІВ) ---
             st.markdown("---")
             st.subheader("📈 Розширений розпис (Альтернативні лінії)" if lang == "uk" else "📈 Alternative Markets")
             
             alt_c1, alt_c2, alt_c3 = st.columns(3)
             
-            # Альтернативні Фори (Від найскладнішої для T1 до найпростішої)
             hdp_list = []
             offsets = [-2.0, -1.0, 0.0, 1.0, 2.0]
             for offset in offsets:
@@ -224,7 +264,6 @@ else:
                 st.caption(f"**Фора ({team1} / {team2})**")
                 st.dataframe(pd.DataFrame(hdp_list), hide_index=True, use_container_width=True)
 
-            # Альтернативний Загальний Тотал
             tot_list = []
             for offset in [2.0, 1.0, 0.0, -1.0, -2.0]:
                 curr_t = base_t + offset
@@ -241,7 +280,6 @@ else:
                 st.caption("**Загальний Тотал (Матч)**" if lang == "uk" else "**Total Kills (Match)**")
                 st.dataframe(pd.DataFrame(tot_list), hide_index=True, use_container_width=True)
                 
-            # Альтернативні Індивідуальні Тотали
             it_list = []
             for offset in [2.0, 1.0, 0.0, -1.0, -2.0]:
                 curr_it1 = base_it1 + offset
