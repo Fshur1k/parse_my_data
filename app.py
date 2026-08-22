@@ -170,23 +170,18 @@ def parse_selected_games(df_games):
             
     return parsed_rows
 
-@st.cache_data(ttl=3600)  # Збільшуємо кеш до 1 години
+@st.cache_data(ttl=3600)
 def load_and_process_csv(source_input):
-    # Pandas вміє сам завантажувати CSV за прямим URL!
     data = pd.read_csv(source_input, low_memory=False)
         
-    # Перевірка наявності потрібної колонки
     if 'position' not in data.columns:
         raise KeyError("Колонку 'position' не знайдено. Перевір формат отриманого файлу.")
         
-    # Залишаємо тільки записи для команд (без окремих гравців)
-    teams_df = data[data['position'] == 'team'].copy()
+    # БІЛЬШЕ НЕ ВИДАЛЯЄМО ГРАВЦІВ ТУТ! Парсимо дати для всього файлу
+    data['parsed_datetime'] = pd.to_datetime(data['date'], errors='coerce')
+    data['date_only'] = data['parsed_datetime'].dt.date
     
-    # Парсинг дати
-    teams_df['parsed_datetime'] = pd.to_datetime(teams_df['date'], errors='coerce')
-    teams_df['date_only'] = teams_df['parsed_datetime'].dt.date
-    
-    return teams_df
+    return data
 
 # ==========================================
 # 2. ОСНОВНИЙ ІНТЕРФЕЙС STREAMLIT
@@ -213,18 +208,16 @@ except Exception as e:
     st.error(f"Помилка зчитування файлу: {e}")
 
 if df is not None:
-    # --- Створюємо дві вкладки ---
     tab1, tab2 = st.tabs(["📊 Експорт матчів", "🧮 Калькулятор піків"])
     
     # ==========================================
-    # Вкладка 1: Твій старий експортер
+    # Вкладка 1: Експортер (Командна статистика)
     # ==========================================
-
     with tab1:
-        # 1. Список усіх турнірів із CSV
-        all_tournaments = sorted(df['league'].dropna().unique().tolist())
+        # Для 1-ї вкладки виділяємо ТІЛЬКИ команди (як було раніше)
+        teams_df = df[df['position'] == 'team'].copy()
         
-        # ВИПРАВЛЕННЯ: Використовуємо st.multiselect замість st.selectbox
+        all_tournaments = sorted(teams_df['league'].dropna().unique().tolist())
         selected_tournaments = st.multiselect(
             "🏆 Оберіть турнір(и):", 
             options=all_tournaments, 
@@ -232,17 +225,10 @@ if df is not None:
             key="tab1_tournaments"
         )
         
-        # ... ТУТ МАЄ БУТИ ВВЕСЬ ТВІЙ СТАРИЙ КОД ФІЛЬТРАЦІЇ ...
-        # (від вибору дат до кнопки "Відправити в Google Sheets")
-        # Просто переконайся, що він має відступ всередині блоку `with tab1:`
-        # 2. Календар за датами
-        min_date = df['date_only'].min()
-        max_date = df['date_only'].max()
+        min_date = teams_df['date_only'].min()
+        max_date = teams_df['date_only'].max()
         selected_date_range = st.sidebar.date_input(
-            "📅 Діапазон дат:",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_value=max_date
+            "📅 Діапазон дат:", value=(min_date, max_date), min_value=min_date, max_value=max_date
         )
         
         if isinstance(selected_date_range, tuple) and len(selected_date_range) == 2:
@@ -250,73 +236,51 @@ if df is not None:
         else:
             start_date = end_date = selected_date_range[0] if isinstance(selected_date_range, (list, tuple)) else selected_date_range
             
-        # Фільтрація
-        filtered_df = df[
-            (df['league'].isin(selected_tournaments)) &
-            (df['date_only'] >= start_date) &
-            (df['date_only'] <= end_date)
+        filtered_df = teams_df[
+            (teams_df['league'].isin(selected_tournaments)) &
+            (teams_df['date_only'] >= start_date) &
+            (teams_df['date_only'] <= end_date)
         ]
         
         if filtered_df.empty:
-                st.warning("⚠️ За обраними фільтрами (турніри / дати) матчів не знайдено.")
+            st.warning("⚠️ За обраними фільтрами (турніри / дати) матчів не знайдено.")
         else:
-            # === БЛОК ГРУПУВАННЯ МАТЧІВ (СЕРІЙ) ===
             series_info = {}
-            
             for game_id, g in filtered_df.groupby('gameid'):
-                # Беремо назви обох команд і сортуємо їх за алфавітом
                 teams = sorted(g['teamname'].dropna().unique().tolist())
                 team_display = f"{teams[0]} vs {teams[1]}" if len(teams) == 2 else " vs ".join(teams)
-                
                 league_name = g['league'].iloc[0]
                 game_date = g['date_only'].iloc[0]
-                
-                # Створюємо унікальний ключ для серії (матчу)
                 series_key = f"{game_date}_{league_name}_{team_display}"
                 
                 if series_key not in series_info:
-                    series_info[series_key] = {
-                        'display_name': f"{game_date} | [{league_name}] {team_display}",
-                        'game_ids': []
-                    }
-                    
-                # Додаємо ID карти до загального списку карт цієї серії
+                    series_info[series_key] = {'display_name': f"{game_date} | [{league_name}] {team_display}", 'game_ids': []}
                 series_info[series_key]['game_ids'].append(game_id)
                 
-            # Додаємо кількість зіграних карт до назви в меню
-            display_options = {}
-            for s_key, info in series_info.items():
-                map_count = len(info['game_ids'])
-                display_options[s_key] = f"{info['display_name']} ({map_count} карт)"
+            display_options = {s_key: f"{info['display_name']} ({len(info['game_ids'])} карт)" for s_key, info in series_info.items()}
     
-            # 3. Множинний вибір матчів
             st.subheader("⚔️ Вибір матчів")
             selected_series_keys = st.multiselect(
-                "Оберіть один або декілька матчів (усі карти підтягнуться автоматично):",
+                "Оберіть один або декілька матчів:",
                 options=list(display_options.keys()),
                 format_func=lambda x: display_options[x],
                 default=list(display_options.keys())[:3] if len(display_options) >= 3 else list(display_options.keys())
             )
             
             if selected_series_keys:
-                # Збираємо всі gameid (карти), що входять у вибрані матчі
                 selected_match_ids = []
                 for s_key in selected_series_keys:
                     selected_match_ids.extend(series_info[s_key]['game_ids'])
                     
-                # Фільтруємо датафрейм за всіма знайденими картами
                 selected_games_df = filtered_df[filtered_df['gameid'].isin(selected_match_ids)]
-                
-                # Парсимо дані
                 parsed_maps_rows = parse_selected_games(selected_games_df)
                 parsed_df = pd.DataFrame(parsed_maps_rows)
                 
-                st.subheader(f"📊 Згенерована таблиця карт ({len(parsed_df)} карт(и))")
+                st.subheader(f"📊 Згенерована таблиця ({len(parsed_df)} карт(и))")
                 st.dataframe(parsed_df)
                 
                 st.markdown("---")
                 st.subheader("📤 Експорт у Google Sheets")
-                
                 col1, col2 = st.columns(2)
                 with col1:
                     st.session_state['sheet_url'] = st.text_input("URL Google Таблиці:", value=st.session_state['sheet_url'])
@@ -324,77 +288,61 @@ if df is not None:
                     st.session_state['sheet_name'] = st.text_input("Назва аркуша:", value=st.session_state['sheet_name'])
                     
                 if st.button("🚀 Відправити в Google Sheets"):
-                    with st.spinner("Запис даних у Google Таблицю..."):
-                        success, message = append_to_sheet(
-                            st.session_state['sheet_url'], 
-                            st.session_state['sheet_name'], 
-                            parsed_maps_rows
-                        )
-                        if success:
-                            st.success(message)
-                        else:
-                            st.error(message)
-
+                    with st.spinner("Записуємо..."):
+                        success, message = append_to_sheet(st.session_state['sheet_url'], st.session_state['sheet_name'], parsed_maps_rows)
+                        if success: st.success(message)
+                        else: st.error(message)
 
     # ==========================================
-    # Вкладка 2: Новий Калькулятор Піків
+    # Вкладка 2: Калькулятор Піків (Вінрейт + Графік)
     # ==========================================
     with tab2:
         st.header("🧮 Аналіз піків та гравців")
         
-        # Витягуємо дані лише по гравцях (виключаємо командну статистику)
+        # Для 2-ї вкладки беремо лише гравців
         players_df = df[df['position'] != 'team'].copy()
-        
-        # Форматуємо патчі, щоб графік малювався коректно (замінюємо коми на крапки)
         players_df['patch'] = players_df['patch'].astype(str).str.replace(',', '.')
         
         teams_list = sorted(players_df['teamname'].dropna().unique().tolist())
         champs_list = sorted(players_df['champion'].dropna().unique().tolist())
         
         if not teams_list:
-            st.warning("Немає даних по командах")
+            st.warning("Дані по гравцях відсутні (або файл їх не містить).")
         else:
-            # Створюємо 3 колонки: Команда 1, Команда 2 і Дашборд
-            col1, col2, col3 = st.columns([1, 1, 1.5])
+            col1, col2, col3 = st.columns([1.2, 1.2, 1.5])
             
-            # --- ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ КАЛЬКУЛЯТОРА ---
             def get_roster(team_name):
-                """Знаходить найчастішого гравця на кожній позиції для обраної команди"""
                 roster = {}
                 team_data = players_df[players_df['teamname'] == team_name]
                 for role in ['top', 'jng', 'mid', 'bot', 'sup']:
                     r_data = team_data[team_data['position'] == role]
                     if not r_data.empty:
-                        # Беремо гравця, який зіграв найбільше ігор на цій ролі
                         roster[role] = r_data['playername'].value_counts().index[0]
                     else:
                         roster[role] = "Невідомо"
                 return roster
 
             def get_stats(player_name, champ_name):
-                """Рахує середнє і медіану кілів, з фолбеком на лігу"""
+                """Повертає Середні кіли, Медіану кілів, Відсоток перемог (Вінрейт) та Джерело"""
                 if not champ_name or champ_name == "None":
-                    return 0, 0, ""
+                    return 0, 0, 0, ""
                 
-                # Шукаємо матчі конкретного гравця на конкретному герої
                 p_data = players_df[(players_df['playername'] == player_name) & (players_df['champion'] == champ_name)]
                 
                 if not p_data.empty:
-                    return p_data['kills'].mean(), p_data['kills'].median(), "Статистика гравця"
+                    wr = p_data['result'].mean() * 100
+                    return p_data['kills'].mean(), p_data['kills'].median(), wr, "Статистика гравця"
                 
-                # Якщо гравець не грав на герої — беремо стату по всіх гравцях на цьому герої
                 c_data = players_df[players_df['champion'] == champ_name]
                 if not c_data.empty:
-                    return c_data['kills'].mean(), c_data['kills'].median(), "В середньому по лізі"
+                    wr = c_data['result'].mean() * 100
+                    return c_data['kills'].mean(), c_data['kills'].median(), wr, "В середньому по лізі"
                 
-                return 0, 0, "Немає даних"
+                return 0, 0, 0, "Немає даних"
 
             roles_display = {'top': 'Top', 'jng': 'Jungle', 'mid': 'Mid', 'bot': 'ADC', 'sup': 'Support'}
-            
-            # Список для збору героїв, обраних на драфті (щоб малювати їх на графіку)
             selected_draft_champs = []
 
-            # --- КОЛОНКА 1 (СИНЯ КОМАНДА) ---
             with col1:
                 st.subheader("🔵 Синя команда")
                 team1 = st.selectbox("Оберіть команду 1", options=teams_list, index=0, key="t1")
@@ -402,66 +350,59 @@ if df is not None:
                 
                 for role, role_name in roles_display.items():
                     st.markdown(f"**{role_name}** | {roster1[role]}")
-                    champ = st.selectbox(f"Пік ({role_name})", ["None"] + champs_list, key=f"t1_champ_{role}")
+                    champ = st.selectbox(f"Пік", ["None"] + champs_list, key=f"t1_{role}")
                     
                     if champ != "None":
                         selected_draft_champs.append(champ)
-                        mean_k, med_k, source = get_stats(roster1[role], champ)
-                        # Виводимо результати
-                        if source == "Статистика гравця":
-                            st.success(f"Кіли: Середнє **{mean_k:.1f}** | Медіана **{med_k:.1f}**")
-                        else:
-                            st.warning(f"Кіли: Середнє **{mean_k:.1f}** | Медіана **{med_k:.1f}** ({source})")
+                        mean_k, med_k, wr, source = get_stats(roster1[role], champ)
+                        msg = f"Кіли (сер/мед): **{mean_k:.1f} / {med_k:.1f}** | WR: **{wr:.0f}%**"
+                        
+                        if source == "Статистика гравця": st.success(msg)
+                        else: st.warning(msg + f" \n*(По лізі)*")
                     st.write("---")
 
-            # --- КОЛОНКА 2 (ЧЕРВОНА КОМАНДА) ---
             with col2:
                 st.subheader("🔴 Червона команда")
-                # Беремо іншу команду за замовчуванням, якщо команд достатньо
                 t2_idx = 1 if len(teams_list) > 1 else 0
                 team2 = st.selectbox("Оберіть команду 2", options=teams_list, index=t2_idx, key="t2")
                 roster2 = get_roster(team2)
                 
                 for role, role_name in roles_display.items():
                     st.markdown(f"**{role_name}** | {roster2[role]}")
-                    champ = st.selectbox(f"Пік ({role_name})", ["None"] + champs_list, key=f"t2_champ_{role}")
+                    champ = st.selectbox(f"Пік", ["None"] + champs_list, key=f"t2_{role}")
                     
                     if champ != "None":
                         selected_draft_champs.append(champ)
-                        mean_k, med_k, source = get_stats(roster2[role], champ)
+                        mean_k, med_k, wr, source = get_stats(roster2[role], champ)
+                        msg = f"Кіли (сер/мед): **{mean_k:.1f} / {med_k:.1f}** | WR: **{wr:.0f}%**"
                         
-                        if source == "Статистика гравця":
-                            st.success(f"Кіли: Середнє **{mean_k:.1f}** | Медіана **{med_k:.1f}**")
-                        else:
-                            st.warning(f"Кіли: Середнє **{mean_k:.1f}** | Медіана **{med_k:.1f}** ({source})")
+                        if source == "Статистика гравця": st.success(msg)
+                        else: st.warning(msg + f" \n*(По лізі)*")
                     st.write("---")
 
-            # --- КОЛОНКА 3 (ДАШБОРД ПАТЧІВ) ---
             with col3:
-                st.subheader("📈 Тренд кілів по патчах")
-                st.write("Оберіть героя на драфті зліва, щоб побачити графік.")
+                st.subheader("📈 Тренд кілів (всі піки)")
                 
-                # Фільтруємо унікальних героїв, яких щойно обрали на драфті
-                unique_champs = list(set(selected_draft_champs))
+                # Відкидаємо дублікати і "None"
+                unique_champs = list(set([c for c in selected_draft_champs if c != "None"]))
                 
                 if unique_champs:
-                    dash_champ = st.selectbox("Аналіз обраного героя:", unique_champs)
+                    st.write(f"Герої на графіку: **{', '.join(unique_champs)}**")
                     
-                    # Готуємо дані для графіка (середні кіли героя по всіх іграх ліги)
-                    champ_trend_data = players_df[players_df['champion'] == dash_champ]
+                    # Фільтруємо дані тільки по обраних героях
+                    champ_trend_data = players_df[players_df['champion'].isin(unique_champs)]
                     
                     if not champ_trend_data.empty:
-                        # Групуємо за патчем і рахуємо середнє
-                        trend_grouped = champ_trend_data.groupby('patch')['kills'].mean().reset_index()
+                        # Групуємо і перетворюємо таблицю для графіка (Патч -> Герой 1, Герой 2...)
+                        trend_grouped = champ_trend_data.groupby(['patch', 'champion'])['kills'].mean().reset_index()
+                        pivot_trend = trend_grouped.pivot(index='patch', columns='champion', values='kills')
                         
-                        # Сортуємо патчі як числа (наскільки це можливо)
-                        # Якщо формат складний, можна просто покластись на алфавітне сортування
-                        trend_grouped = trend_grouped.sort_values(by='patch')
-                        trend_grouped.set_index('patch', inplace=True)
+                        # Сортуємо патчі
+                        pivot_trend = pivot_trend.sort_index()
                         
-                        st.line_chart(trend_grouped)
-                        st.caption(f"Середня кількість кілів **{dash_champ}** (за всіма матчами в базі)")
+                        st.line_chart(pivot_trend)
+                        st.caption("Середня кількість кілів для кожного обраного героя залежно від патчу.")
                     else:
-                        st.info("Недостатньо даних для малювання графіка.")
+                        st.info("Немає даних по патчах для цих героїв.")
                 else:
-                    st.info("Поки що жодного героя не обрано.")
+                    st.info("Оберіть хоча б одного героя зліва для порівняння.")
