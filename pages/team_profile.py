@@ -51,17 +51,25 @@ else:
         
         if not t1_data.empty and not t2_data.empty:
             
-            # === ЛОГІКА ПРЕДИКТУ (МЕДІАНА) ===
-            # Предикт = (Медіана вбивств Команди А + Медіана смертей Команди Б) / 2
+            # === ЛОГІКА ПРЕДИКТУ ===
+            
+            # 1. Предикт для кожної команди окремо (залишаємо як було, бо це їхня індивідуальна сила)
             t1_avg_kills = t1_data['kills'].median()
             t1_avg_deaths = t1_data['deaths'].median()
-            
             t2_avg_kills = t2_data['kills'].median()
             t2_avg_deaths = t2_data['deaths'].median()
             
             t1_expected_kills = (t1_avg_kills + t2_avg_deaths) / 2
             t2_expected_kills = (t2_avg_kills + t1_avg_deaths) / 2
-            total_expected = t1_expected_kills + t2_expected_kills
+            
+            # 2. НОВИЙ ТОТАЛ МАТЧУ (за твоєю логікою)
+            # Рахуємо медіану ЗАГАЛЬНИХ кілів у матчах першої команди (її кіли + смерті)
+            t1_median_total = (t1_data['kills'] + t1_data['deaths']).median()
+            # Рахуємо медіану ЗАГАЛЬНИХ кілів у матчах другої команди
+            t2_median_total = (t2_data['kills'] + t2_data['deaths']).median()
+            
+            # Беремо середнє арифметичне від двох медіан тоталів
+            total_expected = (t1_median_total + t2_median_total) / 2
             
             st.header("🎯 Предикт матчу" if lang == "uk" else "🎯 Match Prediction")
             
@@ -69,8 +77,6 @@ else:
             p_col1.metric(f"Очікувані кіли {team1}", f"{t1_expected_kills:.1f}")
             p_col2.metric(f"Загальний Тотал (O/U)", f"{total_expected:.1f}")
             p_col3.metric(f"Очікувані кіли {team2}", f"{t2_expected_kills:.1f}")
-            
-            st.markdown("---")
             
             # === РОЗПОДІЛ КІЛІВ У ЧАСІ (ТИМЛАЙН) ===
             st.subheader("📈 Темп гри (Вбивства по хвилинах)" if lang == "uk" else "📈 Game Pace (Kills by minutes)")
