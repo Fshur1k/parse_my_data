@@ -151,9 +151,9 @@ else:
             it2_line, it2_o, it2_u = get_markets(it2_raw)
             h1, h2, ho1, ho2 = get_hdp_markets(mu_diff, raw_total)
             
-            # --- 3. ГЕНЕРАЦІЯ БУКМЕКЕРСЬКОЇ ТАБЛИЦІ ---
+            # --- 3. ГЕНЕРАЦІЯ БУКМЕКЕРСЬКОЇ ТАБЛИЦІ (MAIN MARKET) ---
             st.markdown("---")
-            st.subheader("📊 Match markets" if lang == "uk" else "📊 Match Markets")
+            st.subheader("📊 Main markets (Основна лінія)" if lang == "uk" else "📊 Main Markets")
             st.caption(f"Турнір: {current_league} | Очікувана різниця: {mu_diff:+.2f} кілів | Розрахункова маржа: 7.5%")
             
             odds1 = round(1 / (t1_prob * (1 + 0.075)), 2) if t1_prob > 0 else 0
@@ -161,15 +161,98 @@ else:
 
             line_data = pd.DataFrame({
                 "Команда" if lang == "uk" else "Team": [team1, team2],
-                "Переможець" if lang == "uk" else "Win": [f"{odds1:.2f}", f"{odds2:.2f}"],
+                "Победитель" if lang == "uk" else "Win": [f"{odds1:.2f}", f"{odds2:.2f}"],
                 "Фора" if lang == "uk" else "Handicap": [f"{h1:+.1f}", f"{h2:+.1f}"],
                 "КФ Фора" if lang == "uk" else "HDP Odds": [f"{ho1:.2f}", f"{ho2:.2f}"], 
                 "Тотал" if lang == "uk" else "Total": [f"{t_line}", ""],
                 "ТБ" if lang == "uk" else "Over": [f"{t_o:.2f}", ""],
                 "ТМ" if lang == "uk" else "Under": [f"{t_u:.2f}", ""],
-                "Інд. Тотал" if lang == "uk" else "Ind. Total": [f"{it1_line}", f"{it2_line}"],
+                "Инд. Тотал" if lang == "uk" else "Ind. Total": [f"{it1_line}", f"{it2_line}"],
                 "ІТБ" if lang == "uk" else "I.Over": [f"{it1_o:.2f}", f"{it2_o:.2f}"],
                 "ІТМ" if lang == "uk" else "I.Under": [f"{it1_u:.2f}", f"{it2_u:.2f}"]
             })
             
             st.dataframe(line_data, hide_index=True, use_container_width=True)
+
+            # --- 4. РОЗШИРЕНИЙ РОЗПИС (АЛЬТЕРНАТИВНІ ЛІНІЇ) ---
+            st.markdown("---")
+            st.subheader("📈 Розширений розпис (Альтернативні лінії)" if lang == "uk" else "📈 Alternative Markets")
+            
+            alt_c1, alt_c2, alt_c3 = st.columns(3)
+            
+            # 4.1 Альтернативні Фори
+            hdp_list = []
+            for offset in [2.0, 1.0, 0.0, -1.0, -2.0]:
+                curr_h1 = h1 + offset
+                curr_h2 = -curr_h1
+                # Розрахунок точних КФ для зсунутої фори
+                _, _, c_ho1, c_ho2 = get_hdp_markets(mu_diff, raw_total) # dummy call just to get func logic
+                # Реальна логіка ймовірностей:
+                std_d = math.sqrt(raw_total)
+                p1 = 1 - norm_cdf(-curr_h1, mu=mu_diff, sigma=std_d)
+                p2 = 1 - p1
+                co1 = round(1 / (p1 * (1 + 0.075)), 2) if p1 > 0 else 0
+                co2 = round(1 / (p2 * (1 + 0.075)), 2) if p2 > 0 else 0
+                
+                prefix = "🔥 " if offset == 0 else ""
+                hdp_list.append({
+                    "Фора 1" if lang == "uk" else "HDP 1": f"{prefix}{curr_h1:+.1f}",
+                    "КФ 1" if lang == "uk" else "Odds 1": f"{co1:.2f}",
+                    "Фора 2" if lang == "uk" else "HDP 2": f"{curr_h2:+.1f}",
+                    "КФ 2" if lang == "uk" else "Odds 2": f"{co2:.2f}"
+                })
+                
+            with alt_c1:
+                st.caption(f"**Фора ({team1} / {team2})**")
+                st.dataframe(pd.DataFrame(hdp_list), hide_index=True, use_container_width=True)
+
+            # 4.2 Альтернативний Загальний Тотал
+            tot_list = []
+            for offset in [2.0, 1.0, 0.0, -1.0, -2.0]:
+                curr_t = t_line + offset
+                std_t = math.sqrt(raw_total)
+                p_u = norm_cdf(curr_t, mu=raw_total, sigma=std_t)
+                p_o = 1.0 - p_u
+                co = round(1 / (p_o * (1 + 0.075)), 2) if p_o > 0 else 0
+                cu = round(1 / (p_u * (1 + 0.075)), 2) if p_u > 0 else 0
+                
+                prefix = "🔥 " if offset == 0 else ""
+                tot_list.append({
+                    "Тотал" if lang == "uk" else "Total": f"{prefix}{curr_t}",
+                    "Більше" if lang == "uk" else "Over": f"{co:.2f}",
+                    "Менше" if lang == "uk" else "Under": f"{cu:.2f}"
+                })
+                
+            with alt_c2:
+                st.caption("**Загальний Тотал (Матч)**" if lang == "uk" else "**Total Kills (Match)**")
+                st.dataframe(pd.DataFrame(tot_list), hide_index=True, use_container_width=True)
+                
+            # 4.3 Альтернативні Індивідуальні Тотали
+            it_list = []
+            for offset in [2.0, 1.0, 0.0, -1.0, -2.0]:
+                curr_it1 = it1_line + offset
+                curr_it2 = it2_line + offset
+                
+                s1 = math.sqrt(it1_raw)
+                p_u1 = norm_cdf(curr_it1, mu=it1_raw, sigma=s1)
+                co1 = round(1 / ((1-p_u1) * (1 + 0.075)), 2)
+                cu1 = round(1 / (p_u1 * (1 + 0.075)), 2)
+                
+                s2 = math.sqrt(it2_raw)
+                p_u2 = norm_cdf(curr_it2, mu=it2_raw, sigma=s2)
+                co2 = round(1 / ((1-p_u2) * (1 + 0.075)), 2)
+                cu2 = round(1 / (p_u2 * (1 + 0.075)), 2)
+                
+                prefix = "🔥 " if offset == 0 else ""
+                it_list.append({
+                    "ІТ 1" if lang == "uk" else "IT 1": f"{prefix}{curr_it1}",
+                    "Б (1)": f"{co1:.2f}",
+                    "М (1)": f"{cu1:.2f}",
+                    "ІТ 2" if lang == "uk" else "IT 2": f"{prefix}{curr_it2}",
+                    "Б (2)": f"{co2:.2f}",
+                    "М (2)": f"{cu2:.2f}"
+                })
+                
+            with alt_c3:
+                st.caption(f"**Інд. Тотали ({team1[:3]}. / {team2[:3]}.)**" if lang == "uk" else "**Ind. Totals**")
+                st.dataframe(pd.DataFrame(it_list), hide_index=True, use_container_width=True)
