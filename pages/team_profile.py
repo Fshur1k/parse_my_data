@@ -51,13 +51,13 @@ else:
         
         if not t1_data.empty and not t2_data.empty:
             
-            # === ЛОГІКА ПРЕДИКТУ ===
-            # Предикт = (Середні вбивства Команди А + Середні смерті Команди Б) / 2
-            t1_avg_kills = t1_data['kills'].mean()
-            t1_avg_deaths = t1_data['deaths'].mean()
+            # === ЛОГІКА ПРЕДИКТУ (МЕДІАНА) ===
+            # Предикт = (Медіана вбивств Команди А + Медіана смертей Команди Б) / 2
+            t1_avg_kills = t1_data['kills'].median()
+            t1_avg_deaths = t1_data['deaths'].median()
             
-            t2_avg_kills = t2_data['kills'].mean()
-            t2_avg_deaths = t2_data['deaths'].mean()
+            t2_avg_kills = t2_data['kills'].median()
+            t2_avg_deaths = t2_data['deaths'].median()
             
             t1_expected_kills = (t1_avg_kills + t2_avg_deaths) / 2
             t2_expected_kills = (t2_avg_kills + t1_avg_deaths) / 2
@@ -78,11 +78,12 @@ else:
             
             # Збираємо середні значення для графіку (10 хв, 15 хв, Кінець гри)
             # Використовуємо pd.to_numeric для безпеки, бо дані можуть мати пропуски (LPL часто не має стат на 10/15 хв)
-            t1_k10 = pd.to_numeric(t1_data['killsat10'], errors='coerce').mean()
-            t1_k15 = pd.to_numeric(t1_data['killsat15'], errors='coerce').mean()
+            # Використовуємо медіану для тимлайну
+            t1_k10 = pd.to_numeric(t1_data['killsat10'], errors='coerce').median()
+            t1_k15 = pd.to_numeric(t1_data['killsat15'], errors='coerce').median()
             
-            t2_k10 = pd.to_numeric(t2_data['killsat10'], errors='coerce').mean()
-            t2_k15 = pd.to_numeric(t2_data['killsat15'], errors='coerce').mean()
+            t2_k10 = pd.to_numeric(t2_data['killsat10'], errors='coerce').median()
+            t2_k15 = pd.to_numeric(t2_data['killsat15'], errors='coerce').median()
             
             timeline_data = {
                 "Етап гри" if lang == "uk" else "Game Stage": ["10 хв (Early)", "15 хв (Mid)", "Кінець гри (End)"],
@@ -99,9 +100,9 @@ else:
             
             e_col1, e_col2 = st.columns(2)
             
-            # Рахуємо Gold Diff
-            t1_gd15 = pd.to_numeric(t1_data['golddiffat15'], errors='coerce').mean()
-            t2_gd15 = pd.to_numeric(t2_data['golddiffat15'], errors='coerce').mean()
+            # Рахуємо Gold Diff за медіаною
+            t1_gd15 = pd.to_numeric(t1_data['golddiffat15'], errors='coerce').median()
+            t2_gd15 = pd.to_numeric(t2_data['golddiffat15'], errors='coerce').median()
             
             # Стрілочки і кольори
             t1_color = "normal" if t1_gd15 > 0 else "inverse"
