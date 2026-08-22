@@ -2,24 +2,22 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import re
+from datetime import datetime
 
 st.set_page_config(page_title="Експорт Матчів | LoL", layout="wide")
 
 TRANSLATIONS = {
     "uk": {
         "title": "📊 Експорт Матчів у Google Sheets",
-        "reminder": "👋 Привіт! Завантажте файл бази Oracle's Elixir у боковій панелі.",
-        "success_load": "Дані успішно завантажено!",
-        "err_load": "Помилка зчитування файлу:",
+        "sidebar_header": "📁 Джерело даних",
+        "last_update": "⏳ Останній матч у базі:",
         "export_btn": "🚀 Відправити в Google Sheets",
         "writing": "Записуємо..."
     },
     "en": {
         "title": "📊 Match Exporter for Google Sheets",
-        "reminder": "👋 Hello! Upload the Oracle's Elixir file in the sidebar.",
-        "success_load": "Data loaded successfully!",
-        "err_load": "Error reading file:",
+        "sidebar_header": "📁 Data Source",
+        "last_update": "⏳ Last match in database:",
         "export_btn": "🚀 Send to Google Sheets",
         "writing": "Writing..."
     }
@@ -29,13 +27,48 @@ lang_choice = st.sidebar.radio("Language", ["Українська", "English"], 
 lang = "uk" if lang_choice == "Українська" else "en"
 t = TRANSLATIONS[lang]
 
-# Замість URL просто вказуємо назву файлу, який лежить поруч із app.py
-DEFAULT_GDRIVE_LINK = "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+# ==========================================
+# ⚙️ НАЛАШТУВАННЯ ЗАВАНТАЖЕННЯ
+# ==========================================
+# Вказуємо назву файлу, який лежить поруч із app.py на GitHub
+DEFAULT_FILE_PATH = "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+
 if 'sheet_url' not in st.session_state: st.session_state['sheet_url'] = "https://docs.google.com/spreadsheets/d/1kjn9qTW1tgMNtqRwYCg0bQBWvjC9pJ6K-LZ6-G2o274/edit?gid=0#gid=0"
 if 'sheet_name' not in st.session_state: st.session_state['sheet_name'] = "Sheets1"
-if 'df' not in st.session_state: st.session_state['df'] = None
 
-# Допоміжні функції
+@st.cache_data(ttl=3600)
+def load_csv(source):
+    d = pd.read_csv(source, low_memory=False).copy()
+    d['parsed_datetime'] = pd.to_datetime(d['date'], errors='coerce')
+    d['date_only'] = d['parsed_datetime'].dt.date
+    return d
+
+def get_time_ago(last_date):
+    """Форматує час, що пройшов з дати останнього матчу"""
+    now = datetime.now().date()
+    delta = now - last_date
+    days = delta.days
+    
+    if days <= 0:
+        return "Сьогодні" if lang == "uk" else "Today"
+    elif days == 1:
+        return "1 день тому" if lang == "uk" else "1 day ago"
+    elif days % 10 == 1 and days % 100 != 11:
+        return f"{days} день тому" if lang == "uk" else f"{days} days ago"
+    elif 2 <= days % 10 <= 4 and not (12 <= days % 100 <= 14):
+        return f"{days} дні тому" if lang == "uk" else f"{days} days ago"
+    else:
+        return f"{days} днів тому" if lang == "uk" else f"{days} days ago"
+
+# --- ПРЕДЗАВАНТАЖЕННЯ БАЗИ ---
+if 'df' not in st.session_state or st.session_state['df'] is None:
+    try:
+        st.session_state['df'] = load_csv(DEFAULT_FILE_PATH)
+    except Exception as e:
+        st.session_state['df'] = None
+        st.error(f"Помилка зчитування дефолтного файлу: {e}")
+
+# Допоміжні функції (Google Sheets та Парсинг)
 def get_gspread_client():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds = ServiceAccountCredentials.from_json_keyfile_dict(dict(st.secrets["gcp_service_account"]), scope)
@@ -83,26 +116,30 @@ def parse_games(df_games):
             })
     return parsed
 
-@st.cache_data(ttl=3600)
-def load_csv(source):
-    d = pd.read_csv(source, low_memory=False).copy()
-    d['parsed_datetime'] = pd.to_datetime(d['date'], errors='coerce')
-    d['date_only'] = d['parsed_datetime'].dt.date
-    return d
 
+# ==========================================
+# ОСНОВНИЙ ІНТЕРФЕЙС
+# ==========================================
 st.title(t["title"])
-st.sidebar.header("📁 Джерело даних" if lang == "uk" else "📁 Data Source")
-uploaded_file = st.sidebar.file_uploader("CSV", type=['csv'], label_visibility="collapsed")
-with st.sidebar.expander("🔗 Додатково: Завантажити за посиланням" if lang == "uk" else "🔗 Advanced: URL Load"):
-    url_input = st.text_input("URL:", value=DEFAULT_GDRIVE_LINK)
-    if st.button("Завантажити" if lang == "uk" else "Load"):
-        with st.spinner("Завантаження..."): st.session_state['df'] = load_csv(url_input)
 
-if uploaded_file: st.session_state['df'] = load_csv(uploaded_file)
+st.sidebar.header(t["sidebar_header"])
+
 df = st.session_state['df']
 
-if df is None: st.info(t["reminder"])
-else:
+# Виводимо інформацію про останній апдейт у боковому меню
+if df is not None:
+    last_match_date = df['date_only'].max()
+    time_ago = get_time_ago(last_match_date)
+    st.sidebar.info(f"**{t['last_update']}**\n\n🗓️ {last_match_date} ({time_ago})")
+
+# Залишаємо можливість завантажити новий файл для оновлення
+with st.sidebar.expander("📁 Завантажити новий файл" if lang == "uk" else "📁 Upload new file"):
+    uploaded_file = st.file_uploader("CSV", type=['csv'], label_visibility="collapsed")
+    if uploaded_file: 
+        st.session_state['df'] = load_csv(uploaded_file)
+        st.rerun() # Оновлюємо сторінку одразу після завантаження
+
+if df is not None:
     t_df = df[df['position'] == 'team'].copy()
     all_t = sorted(t_df['league'].dropna().unique().tolist())
     sel_t = st.multiselect("🏆 Турніри / Tournaments:", options=all_t, default=['LEC', 'LCK', 'LPL'] if all(x in all_t for x in ['LEC', 'LCK', 'LPL']) else all_t[:3])
