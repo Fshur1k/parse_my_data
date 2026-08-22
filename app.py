@@ -219,12 +219,16 @@ if df is not None:
     # ==========================================
     # Вкладка 1: Твій старий експортер
     # ==========================================
+
     with tab1:
         # 1. Список усіх турнірів із CSV
         all_tournaments = sorted(df['league'].dropna().unique().tolist())
-        selected_tournaments = st.selectbox(
+        
+        # ВИПРАВЛЕННЯ: Використовуємо st.multiselect замість st.selectbox
+        selected_tournaments = st.multiselect(
             "🏆 Оберіть турнір(и):", 
             options=all_tournaments, 
+            default=['LEC', 'LCK', 'LPL'] if all(x in all_tournaments for x in ['LEC', 'LCK', 'LPL']) else all_tournaments[:3],
             key="tab1_tournaments"
         )
         
