@@ -95,16 +95,26 @@ else:
                 ou = round(1 / (p_u * (1 + margin)), 2) if p_u > 0 else 0
                 return oo, ou
 
-            def get_hdp_odds(h1, mu_diff, sigma_hdp=37.0, margin=0.075):
-                """Розрахунок коефіцієнтів для фор з фіксованою дисперсією (Bookmaker Style)"""
-                # Команда 1 покриває фору, якщо Різниця > -Фора1
+            def get_hdp_odds(h1, mu_diff, t1_win_prob, t2_win_prob, sigma_hdp=37.0, margin=0.075):
+                """Розрахунок коефіцієнтів для фор із запобіжником на чисту перемогу"""
+                # Ймовірність за нормальним розподілом
                 p_t1 = 1.0 - norm_cdf(-h1, mu=mu_diff, sigma=sigma_hdp)
                 p_t2 = 1.0 - p_t1
+                
+                # Букмекерський запобіжник: 
+                # Якщо фора мінусова (фаворит), ймовірність її пробиття не може бути вищою за ймовірність просто виграти
+                if h1 < 0: p_t1 = min(p_t1, t1_win_prob)
+                elif h1 > 0: p_t1 = max(p_t1, t1_win_prob) # плюсова фора має заходити частіше ніж чиста перемога
+                
+                h2 = -h1
+                if h2 < 0: p_t2 = min(p_t2, t2_win_prob)
+                elif h2 > 0: p_t2 = max(p_t2, t2_win_prob)
+
                 o1 = round(1 / (p_t1 * (1 + margin)), 2) if p_t1 > 0 else 0
                 o2 = round(1 / (p_t2 * (1 + margin)), 2) if p_t2 > 0 else 0
                 return o1, o2
 
-            # Константи розкиду ліній (взяті з реальних букмекерських моделей)
+            # Константи розкиду ліній
             SIGMA_HDP = 37.0
             SIGMA_TOT = 9.0
             SIGMA_IT = 6.0
@@ -133,14 +143,22 @@ else:
             
             p_fav = t1_prob if t1_prob >= 0.5 else t2_prob
             diff_magnitude = tier_multiplier * math.sqrt(p_fav - 0.5)
+            
+            # Різниця вбивств (T1 - T2). Якщо T1 фаворит, різниця додатна.
             mu_diff = diff_magnitude if t1_prob >= 0.5 else -diff_magnitude
             
             it1_raw = (raw_total + mu_diff) / 2
             it2_raw = (raw_total - mu_diff) / 2
 
             # --- 2. ВИЗНАЧЕННЯ НОМІНАЛЬНИХ ЛІНІЙ (.5) ---
-            if mu_diff >= 0: base_h1 = math.floor(mu_diff) + 0.5
-            else: base_h1 = math.ceil(mu_diff) - 0.5
+            # Якщо mu_diff додатне (Команда 1 фаворит), її базова фора має бути від'ємною
+            raw_h1 = -mu_diff 
+            base_h1 = round(raw_h1 * 2) / 2
+            if base_h1 % 1 == 0:
+                base_h1 = base_h1 - 0.5 if base_h1 > 0 else base_h1 + 0.5
+            # Якщо матч ідеально рівний
+            if base_h1 == 0: base_h1 = -0.5
+            
             base_h2 = -base_h1
             
             base_t = round(raw_total * 2) / 2
@@ -160,14 +178,14 @@ else:
             odds1 = round(1 / (t1_prob * (1 + 0.075)), 2) if t1_prob > 0 else 0
             odds2 = round(1 / (t2_prob * (1 + 0.075)), 2) if t2_prob > 0 else 0
 
-            m_ho1, m_ho2 = get_hdp_odds(base_h1, mu_diff, SIGMA_HDP)
+            m_ho1, m_ho2 = get_hdp_odds(base_h1, mu_diff, t1_prob, t2_prob, SIGMA_HDP)
             m_to, m_tu = get_markets(base_t, raw_total, SIGMA_TOT)
             m_it1_o, m_it1_u = get_markets(base_it1, it1_raw, SIGMA_IT)
             m_it2_o, m_it2_u = get_markets(base_it2, it2_raw, SIGMA_IT)
 
             line_data = pd.DataFrame({
                 "Команда" if lang == "uk" else "Team": [team1, team2],
-                "Переможець" if lang == "uk" else "Win": [f"{odds1:.2f}", f"{odds2:.2f}"],
+                "Победитель" if lang == "uk" else "Win": [f"{odds1:.2f}", f"{odds2:.2f}"],
                 "Фора" if lang == "uk" else "Handicap": [f"{base_h1:+.1f}", f"{base_h2:+.1f}"],
                 "КФ Фора" if lang == "uk" else "HDP Odds": [f"{m_ho1:.2f}", f"{m_ho2:.2f}"], 
                 "Тотал" if lang == "uk" else "Total": [f"{base_t}", ""],
@@ -186,12 +204,13 @@ else:
             
             alt_c1, alt_c2, alt_c3 = st.columns(3)
             
-            # Альтернативні Фори
+            # Альтернативні Фори (Від найскладнішої для T1 до найпростішої)
             hdp_list = []
-            for offset in [2.0, 1.0, 0.0, -1.0, -2.0]:
+            offsets = [-2.0, -1.0, 0.0, 1.0, 2.0]
+            for offset in offsets:
                 curr_h1 = base_h1 + offset
                 curr_h2 = -curr_h1
-                co1, co2 = get_hdp_odds(curr_h1, mu_diff, SIGMA_HDP)
+                co1, co2 = get_hdp_odds(curr_h1, mu_diff, t1_prob, t2_prob, SIGMA_HDP)
                 
                 prefix = "🔥 " if offset == 0 else ""
                 hdp_list.append({
