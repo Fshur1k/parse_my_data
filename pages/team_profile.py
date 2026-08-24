@@ -412,7 +412,7 @@ else:
             # --- 7.5. РОЗРАХУНОК LIVE МОДЕЛІ ---
             exp_len_safe = max(20.0, expected_length)
             x_points = [0, 10, 15, exp_len_safe]
-            y_points = [0, exp_k10, exp_k15, raw_total] # Використовуємо raw_total з налаштувань вище
+            y_points = [0, exp_k10, exp_k15, raw_total]
             
             if curr_min_exact > exp_len_safe:
                 x_points.append(curr_min_exact)
@@ -423,8 +423,13 @@ else:
             
             # Корекція темпу (Snowball / Pace Adjustment)
             live_lead_intensity = abs((live_prob / 100.0) - 0.5) * 2.0
+            
+            # ФАКТОР ЧАСУ: На 0-й хвилині вплив відриву = 0. 
+            # Максимально впливає на темп після 15-ї хвилини.
+            time_factor = min(1.0, curr_min_exact / 15.0)
+            
             max_penalty = 0.55
-            snowball_mult = 1.0 - (live_lead_intensity * max_penalty)
+            snowball_mult = 1.0 - (live_lead_intensity * max_penalty * time_factor)
             adjusted_remaining = expected_remaining_base * snowball_mult
             
             live_prediction = current_total + adjusted_remaining
