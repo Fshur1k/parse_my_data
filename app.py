@@ -31,7 +31,7 @@ t = TRANSLATIONS[lang]
 # ⚙️ НАЛАШТУВАННЯ ЗАВАНТАЖЕННЯ
 # ==========================================
 # Вказуємо назву файлу, який лежить поруч із app.py на GitHub
-DEFAULT_FILE_PATH = "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+DEFAULT_FILE_PATH = "2026_LoL_esports_match_data_from_OraclesElixir.csv.zip"
 
 if 'sheet_url' not in st.session_state: st.session_state['sheet_url'] = "https://docs.google.com/spreadsheets/d/1kjn9qTW1tgMNtqRwYCg0bQBWvjC9pJ6K-LZ6-G2o274/edit?gid=0#gid=0"
 if 'sheet_name' not in st.session_state: st.session_state['sheet_name'] = "Sheets1"
