@@ -385,9 +385,10 @@ else:
             current_s = int(st.session_state.timer_seconds % 60)
             
             with tc4:
-                man_m = st.number_input("Хвилини" if lang == "uk" else "Minutes", min_value=0, max_value=120, value=current_m, step=1, key="man_m")
+                # ВАЖЛИВО: Видалено key="", тепер значення вільно оновлюється фоновим таймером
+                man_m = st.number_input("Хвилини" if lang == "uk" else "Minutes", min_value=0, max_value=120, value=current_m, step=1)
             with tc5:
-                man_s = st.number_input("Секунди" if lang == "uk" else "Seconds", min_value=0, max_value=59, value=current_s, step=1, key="man_s")
+                man_s = st.number_input("Секунди" if lang == "uk" else "Seconds", min_value=0, max_value=59, value=current_s, step=1)
 
             if man_m != current_m or man_s != current_s:
                 st.session_state.timer_seconds = man_m * 60 + man_s
@@ -461,3 +462,9 @@ else:
                 "🔥 ПРОГНОЗ (LIVE ТОТАЛ)" if lang == "uk" else "🔥 LIVE PREDICTION", 
                 f"{live_prediction:.1f}"
             )
+            
+            # --- 7.7. АВТО-ОНОВЛЕННЯ ДЛЯ ЖИВОГО ТАЙМЕРА ---
+            # Якщо таймер запущено, сторінка буде автоматично оновлюватися кожну 1 секунду
+            if st.session_state.timer_running:
+                time.sleep(1)
+                st.rerun()
