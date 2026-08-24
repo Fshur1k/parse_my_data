@@ -44,16 +44,10 @@ if not t1_data.empty and not t2_data.empty:
         s = pd.to_numeric(series, errors='coerce').dropna()
         return s.median() if not s.empty else 0
 
-    # Очікувані кіли та смерті
-    t1_kills, t1_deaths = safe_median(t1_data['kills']), safe_median(t1_data['deaths'])
-    t2_kills, t2_deaths = safe_median(t2_data['kills']), safe_median(t2_data['deaths'])
-    
-    # Очікувана тривалість гри (у хвилинах)
     t1_time = safe_median(t1_data['gamelength']) / 60
     t2_time = safe_median(t2_data['gamelength']) / 60
     expected_length = (t1_time + t2_time) / 2
     
-    # Кіли на 10 та 15 хвилинах (Команда + Суперник = Тотал матчу на цій хвилині)
     t1_k10_tot = safe_median(t1_data['killsat10']) + safe_median(t1_data['opp_killsat10']) if 'opp_killsat10' in t1_data.columns else safe_median(t1_data['killsat10']) * 2
     t2_k10_tot = safe_median(t2_data['killsat10']) + safe_median(t2_data['opp_killsat10']) if 'opp_killsat10' in t2_data.columns else safe_median(t2_data['killsat10']) * 2
     exp_k10 = (t1_k10_tot + t2_k10_tot) / 2
@@ -62,14 +56,13 @@ if not t1_data.empty and not t2_data.empty:
     t2_k15_tot = safe_median(t2_data['killsat15']) + safe_median(t2_data['opp_killsat15']) if 'opp_killsat15' in t2_data.columns else safe_median(t2_data['killsat15']) * 2
     exp_k15 = (t1_k15_tot + t2_k15_tot) / 2
     
-    # Загальний очікуваний тотал (як ми рахували раніше)
     t1_total_med = safe_median(t1_data['kills'] + t1_data['deaths'])
     t2_total_med = safe_median(t2_data['kills'] + t2_data['deaths'])
     expected_total = (t1_total_med + t2_total_med) / 2
 
-    # --- ВВІД LIVE-ДАНИХ ---
+    # --- 2. ВВІД LIVE-ДАНИХ ТА ОЦІНКА СИЛИ ---
     st.markdown("---")
-    st.subheader("⏱️ Live Ситуація (Введіть поточні дані)" if lang == "uk" else "⏱️ Live Situation (Enter current data)")
+    st.subheader("⏱️ Live Ситуація" if lang == "uk" else "⏱️ Live Situation")
     
     col_t, col_k1, col_k2 = st.columns(3)
     curr_min = col_t.number_input("Поточна хвилина (Min):" if lang == "uk" else "Current Minute:", min_value=1, max_value=60, value=15, step=1)
@@ -78,51 +71,60 @@ if not t1_data.empty and not t2_data.empty:
     
     current_total = curr_k1 + curr_k2
     
-    # --- 2. МАТЕМАТИЧНА МОДЕЛЬ ТЕМПУ (INTERPOLATION) ---
-    # Точки для графіка: [Хвилина], [Очікувані Кіли]
-    # Запобіжник: якщо очікуваний час менше 15, ставимо хоча б 20
-    exp_len_safe = max(20.0, expected_length)
+    st.write("⚖️ **Оцінка поточної переваги (Золото, Дракони, Темп)**" if lang == "uk" else "⚖️ **Live Game State Assessment (Gold, Drakes, Pace)**")
     
+    live_prob = st.slider(
+        f"Шанс на перемогу {team1} у цій грі (%)" if lang == "uk" else f"Win Probability for {team1} (%)",
+        min_value=1, max_value=99, value=50, step=1,
+        help="Оцініть реальну силу команд на карті зараз. 50% - рівна гра. 80%+ - жорстка домінація однієї з команд." if lang == "uk" else "Assess the real power on the map right now. 50% = Even game. 80%+ = Heavy stomp."
+    )
+    
+    # --- 3. МАТЕМАТИЧНА МОДЕЛЬ ТЕМПУ ---
+    exp_len_safe = max(20.0, expected_length)
     x_points = [0, 10, 15, exp_len_safe]
     y_points = [0, exp_k10, exp_k15, expected_total]
     
-    # Якщо поточна хвилина більша за очікуваний кінець, екстраполюємо лінійно
     if curr_min > exp_len_safe:
         x_points.append(curr_min)
-        # Додаємо трохи кілів за "лейт-гейм фієсту" (наприклад, 1 кіл на хвилину)
         y_points.append(expected_total + (curr_min - exp_len_safe) * 1.2)
         
-    # Розраховуємо очікувану кількість кілів саме на поточну хвилину
     expected_at_curr_min = np.interp(curr_min, x_points, y_points)
-    
-    # Залишок кілів = Загальний Тотал - Очікувані кіли на даний момент
-    # (Не може бути від'ємним)
     expected_remaining_base = max(0, expected_total - expected_at_curr_min)
     
-    # Корекція темпу (Pace Adjustment)
-    # Якщо команди роблять кіли швидше, ніж очікувалося, гра може закінчитися швидше (снігова куля),
-    # АБО вона перетвориться на фієсту. Зазвичай букмекери беруть чистий залишок + поточні кіли.
-    pace_diff = current_total - expected_at_curr_min
+    # --- 4. МАНУАЛЬНА СНОУБОЛ КОРЕКЦІЯ ---
+    # Перетворюємо вірогідність (1-99) в індекс домінації від 0.0 (рівна гра) до 1.0 (повний розгром)
+    live_lead_intensity = abs((live_prob / 100.0) - 0.5) * 2.0
     
-    live_prediction = current_total + expected_remaining_base
+    # Максимальне "зрізання" кілів, якщо команда знищує іншу (до 55% зрізки залишку при 99% вірогідності)
+    max_penalty = 0.55
+    
+    snowball_mult = 1.0 - (live_lead_intensity * max_penalty)
+    adjusted_remaining = expected_remaining_base * snowball_mult
+    
+    live_prediction = current_total + adjusted_remaining
 
-    # --- 3. ВІЗУАЛІЗАЦІЯ ---
+    # --- 5. ВІЗУАЛІЗАЦІЯ ---
     st.markdown("---")
     st.subheader("📊 Live Предикт" if lang == "uk" else "📊 Live Prediction")
     
     res_c1, res_c2, res_c3 = st.columns(3)
     res_c1.metric(
-        "Очікуваний час гри" if lang == "uk" else "Expected Game Length", 
-        f"{expected_length:.1f} хв"
+        "Залишок кілів (До корекції)" if lang == "uk" else "Remaining Kills (Base)", 
+        f"{expected_remaining_base:.1f}"
     )
+    
+    snowball_diff = adjusted_remaining - expected_remaining_base
+    penalty_text = "Рівна гра" if live_lead_intensity < 0.1 else "Відрив по золоту/об'єктах"
+    if lang == "en": penalty_text = "Even game" if live_lead_intensity < 0.1 else "Gold/Objective Lead Penalty"
+    
     res_c2.metric(
-        "Очікувано кілів на цю хвилину" if lang == "uk" else "Expected Kills at this min", 
-        f"{expected_at_curr_min:.1f}", 
-        delta=f"{pace_diff:+.1f} (Темп)", delta_color="inverse"
+        "Скор. Залишок (Корекція сили)" if lang == "uk" else "Adj. Remaining (Pace Correction)", 
+        f"{adjusted_remaining:.1f}", 
+        delta=f"{snowball_diff:.1f} ({penalty_text})", 
+        delta_color="inverse" if snowball_diff < 0 else "normal"
     )
+    
     res_c3.metric(
         "🔥 ПРОГНОЗ (LIVE ТОТАЛ)" if lang == "uk" else "🔥 LIVE PREDICTION", 
         f"{live_prediction:.1f}"
     )
-    
-    st.caption("Формула: Поточні Кіли + Історично очікуваний залишок кілів для цих команд з поточної хвилини." if lang == "uk" else "Formula: Current Kills + Historically expected remaining kills from this minute.")
