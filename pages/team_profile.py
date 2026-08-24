@@ -312,3 +312,142 @@ else:
             with alt_c3:
                 st.caption(f"**Інд. Тотали ({team1[:3]}. / {team2[:3]}.)**" if lang == "uk" else "**Ind. Totals**")
                 st.dataframe(pd.DataFrame(it_list), hide_index=True, use_container_width=True)
+
+            # ==========================================
+            # --- 7. ІНТЕГРОВАНИЙ LIVE PREDICTOR ---
+            # ==========================================
+            import time
+            import numpy as np
+
+            st.markdown("---")
+            st.header("🔴 Live Предикт (In-Play)" if lang == "uk" else "🔴 Live Predictor (In-Play)")
+            st.caption("Цей інструмент автоматично використовує очікування (Тотали та Темп), розраховані математичною моделлю вище." if lang == "uk" else "This tool automatically uses the expectations (Totals and Pace) calculated by the math model above.")
+
+            # --- 7.1. ПІДГОТОВКА ІСТОРИЧНОГО ТЕМПУ (ДЛЯ ІНТЕРПОЛЯЦІЇ) ---
+            def safe_median(series):
+                s = pd.to_numeric(series, errors='coerce').dropna()
+                return float(s.median()) if not s.empty else 0.0
+
+            # Очікуваний час
+            hist_len = (safe_median(t1_data['gamelength']) / 60 + safe_median(t2_data['gamelength']) / 60) / 2
+            expected_length = hist_len if hist_len > 0 else 32.0
+
+            # Історичний темп кілів (до масштабування)
+            hist_t1_k = safe_median(t1_data['kills'])
+            hist_t2_k = safe_median(t2_data['kills'])
+            hist_total = hist_t1_k + hist_t2_k if (hist_t1_k + hist_t2_k) > 0 else 25.0
+
+            t1_k10_tot = safe_median(t1_data['killsat10']) + safe_median(t1_data['opp_killsat10']) if 'opp_killsat10' in t1_data.columns else safe_median(t1_data['killsat10']) * 2
+            t2_k10_tot = safe_median(t2_data['killsat10']) + safe_median(t2_data['opp_killsat10']) if 'opp_killsat10' in t2_data.columns else safe_median(t2_data['killsat10']) * 2
+            hist_k10 = (t1_k10_tot + t2_k10_tot) / 2
+
+            t1_k15_tot = safe_median(t1_data['killsat15']) + safe_median(t1_data['opp_killsat15']) if 'opp_killsat15' in t1_data.columns else safe_median(t1_data['killsat15']) * 2
+            t2_k15_tot = safe_median(t2_data['killsat15']) + safe_median(t2_data['opp_killsat15']) if 'opp_killsat15' in t2_data.columns else safe_median(t2_data['killsat15']) * 2
+            hist_k15 = (t1_k15_tot + t2_k15_tot) / 2
+
+            # Синхронізація темпу: масштабуємо кіли на 10/15 хв відносно raw_total (з математичної моделі)
+            pace_scale = raw_total / hist_total
+            exp_k10 = hist_k10 * pace_scale
+            exp_k15 = hist_k15 * pace_scale
+
+            # --- 7.2. СТАН ТАЙМЕРА ---
+            if 'timer_running' not in st.session_state: 
+                st.session_state.timer_running = False
+            if 'timer_seconds' not in st.session_state: 
+                st.session_state.timer_seconds = 15.0 * 60.0 
+            if 'last_tick' not in st.session_state: 
+                st.session_state.last_tick = time.time()
+
+            now = time.time()
+            if st.session_state.timer_running:
+                st.session_state.timer_seconds += (now - st.session_state.last_tick)
+            st.session_state.last_tick = now
+
+            # --- 7.3. ІНТЕРФЕЙС ТАЙМЕРА ТА РАХУНКУ ---
+            st.subheader("⏱️ Live Таймер та Рахунок" if lang == "uk" else "⏱️ Live Timer & Score")
+            
+            tc1, tc2, tc3, tc4, tc5 = st.columns([1, 1, 1, 1, 1])
+            with tc1:
+                if st.button("⏸ Пауза" if st.session_state.timer_running else "▶️ Старт", use_container_width=True, key="timer_btn"):
+                    st.session_state.timer_running = not st.session_state.timer_running
+                    st.rerun()
+            with tc2:
+                if st.button("-10 сек", use_container_width=True, key="sub_10"):
+                    st.session_state.timer_seconds = max(0.0, st.session_state.timer_seconds - 10)
+                    st.rerun()
+            with tc3:
+                if st.button("+10 сек", use_container_width=True, key="add_10"):
+                    st.session_state.timer_seconds += 10
+                    st.rerun()
+                    
+            current_m = int(st.session_state.timer_seconds // 60)
+            current_s = int(st.session_state.timer_seconds % 60)
+            
+            with tc4:
+                man_m = st.number_input("Хвилини" if lang == "uk" else "Minutes", min_value=0, max_value=120, value=current_m, step=1, key="man_m")
+            with tc5:
+                man_s = st.number_input("Секунди" if lang == "uk" else "Seconds", min_value=0, max_value=59, value=current_s, step=1, key="man_s")
+
+            if man_m != current_m or man_s != current_s:
+                st.session_state.timer_seconds = man_m * 60 + man_s
+                st.rerun()
+
+            curr_min_exact = st.session_state.timer_seconds / 60.0
+
+            # --- 7.4. ОЦІНКА СИЛИ ТА КІЛИ ---
+            c_k1, c_k2, c_str = st.columns([1, 1, 2])
+            with c_k1:
+                curr_k1 = st.number_input(f"⚔️ Кіли {team1}:", min_value=0, max_value=100, value=5, step=1, key="curr_k1")
+            with c_k2:
+                curr_k2 = st.number_input(f"⚔️ Кіли {team2}:", min_value=0, max_value=100, value=5, step=1, key="curr_k2")
+            with c_str:
+                live_prob = st.number_input(
+                    f"⚖️ Шанс на перемогу {team1} у Live (%)" if lang == "uk" else f"⚖️ Live Win Prob {team1} (%)",
+                    min_value=1, max_value=99, value=int(t1_prob * 100), step=1, key="live_prob",
+                    help="50% = Рівна гра. Враховуйте золото та драконів." if lang == "uk" else "50% = Even game. Consider gold and dragons."
+                )
+            
+            current_total = curr_k1 + curr_k2
+            
+            # --- 7.5. РОЗРАХУНОК LIVE МОДЕЛІ ---
+            exp_len_safe = max(20.0, expected_length)
+            x_points = [0, 10, 15, exp_len_safe]
+            y_points = [0, exp_k10, exp_k15, raw_total] # Використовуємо raw_total з налаштувань вище
+            
+            if curr_min_exact > exp_len_safe:
+                x_points.append(curr_min_exact)
+                y_points.append(raw_total + (curr_min_exact - exp_len_safe) * 1.2)
+                
+            expected_at_curr_min = np.interp(curr_min_exact, x_points, y_points)
+            expected_remaining_base = max(0, raw_total - expected_at_curr_min)
+            
+            # Корекція темпу (Snowball / Pace Adjustment)
+            live_lead_intensity = abs((live_prob / 100.0) - 0.5) * 2.0
+            max_penalty = 0.55
+            snowball_mult = 1.0 - (live_lead_intensity * max_penalty)
+            adjusted_remaining = expected_remaining_base * snowball_mult
+            
+            live_prediction = current_total + adjusted_remaining
+
+            # --- 7.6. ВІЗУАЛІЗАЦІЯ ПРЕДИКТУ ---
+            res_c1, res_c2, res_c3 = st.columns(3)
+            res_c1.metric(
+                "Залишок кілів (До корекції)" if lang == "uk" else "Remaining Kills (Base)", 
+                f"{expected_remaining_base:.1f}"
+            )
+            
+            snowball_diff = adjusted_remaining - expected_remaining_base
+            penalty_text = "Рівна гра" if live_lead_intensity < 0.1 else "Відрив по макро"
+            if lang == "en": penalty_text = "Even game" if live_lead_intensity < 0.1 else "Macro Lead Penalty"
+            
+            res_c2.metric(
+                "Скор. Залишок (Корекція сили)" if lang == "uk" else "Adj. Remaining (Pace Correction)", 
+                f"{adjusted_remaining:.1f}", 
+                delta=f"{snowball_diff:.1f} ({penalty_text})", 
+                delta_color="inverse" if snowball_diff < 0 else "normal"
+            )
+            
+            res_c3.metric(
+                "🔥 ПРОГНОЗ (LIVE ТОТАЛ)" if lang == "uk" else "🔥 LIVE PREDICTION", 
+                f"{live_prediction:.1f}"
+            )
