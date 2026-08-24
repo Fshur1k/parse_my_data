@@ -397,9 +397,11 @@ else:
             # --- 7.4. ОЦІНКА СИЛИ ТА КІЛИ ---
             c_k1, c_k2, c_str = st.columns([1, 1, 2])
             with c_k1:
-                curr_k1 = st.number_input(f"⚔️ Кіли {team1}:", min_value=0, max_value=100, value=5, step=1, key="curr_k1")
+                # ЗМІНА: Встановили value=0, щоб гра завжди починалася з нулів
+                curr_k1 = st.number_input(f"⚔️ Кіли {team1}:", min_value=0, max_value=100, value=0, step=1, key="curr_k1")
             with c_k2:
-                curr_k2 = st.number_input(f"⚔️ Кіли {team2}:", min_value=0, max_value=100, value=5, step=1, key="curr_k2")
+                # ЗМІНА: Встановили value=0
+                curr_k2 = st.number_input(f"⚔️ Кіли {team2}:", min_value=0, max_value=100, value=0, step=1, key="curr_k2")
             with c_str:
                 live_prob = st.number_input(
                     f"⚖️ Шанс на перемогу {team1} у Live (%)" if lang == "uk" else f"⚖️ Live Win Prob {team1} (%)",
@@ -407,12 +409,13 @@ else:
                     help="50% = Рівна гра. Враховуйте золото та драконів." if lang == "uk" else "50% = Even game. Consider gold and dragons."
                 )
             
+            # Чіткий підрахунок поточних кілів
             current_total = curr_k1 + curr_k2
             
             # --- 7.5. РОЗРАХУНОК LIVE МОДЕЛІ ---
             exp_len_safe = max(20.0, expected_length)
             x_points = [0, 10, 15, exp_len_safe]
-            y_points = [0, exp_k10, exp_k15, raw_total]
+            y_points = [0, exp_k10, exp_k15, raw_total] # Використовуємо raw_total з налаштувань вище
             
             if curr_min_exact > exp_len_safe:
                 x_points.append(curr_min_exact)
@@ -432,6 +435,7 @@ else:
             snowball_mult = 1.0 - (live_lead_intensity * max_penalty * time_factor)
             adjusted_remaining = expected_remaining_base * snowball_mult
             
+            # Фінальний прогноз: Поточні реальні кіли + Скоригований залишок
             live_prediction = current_total + adjusted_remaining
 
             # --- 7.6. ВІЗУАЛІЗАЦІЯ ПРЕДИКТУ ---
