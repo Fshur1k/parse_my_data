@@ -38,7 +38,15 @@ if 'sheet_name' not in st.session_state: st.session_state['sheet_name'] = "Sheet
 
 @st.cache_data(ttl=3600)
 def load_csv(source):
-    d = pd.read_csv(source, low_memory=False).copy()
+    # Визначаємо, чи передали нам рядок (шлях до файлу) чи об'єкт (UploadedFile)
+    filename = source.name if hasattr(source, 'name') else str(source)
+    
+    # Якщо це zip архів, вказуємо компресію
+    if filename.endswith('.zip'):
+        d = pd.read_csv(source, low_memory=False, compression='zip').copy()
+    else:
+        d = pd.read_csv(source, low_memory=False).copy()
+        
     d['parsed_datetime'] = pd.to_datetime(d['date'], errors='coerce')
     d['date_only'] = d['parsed_datetime'].dt.date
     return d
