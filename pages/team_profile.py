@@ -367,7 +367,7 @@ else:
             # --- 7.3. ІНТЕРФЕЙС ТАЙМЕРА ТА РАХУНКУ ---
             st.subheader("⏱️ Live Таймер та Рахунок" if lang == "uk" else "⏱️ Live Timer & Score")
             
-            tc1, tc2, tc3, tc4, tc5 = st.columns([1, 1, 1, 1, 1])
+            tc1, tc2, tc3, tc_res, tc4, tc5 = st.columns([1, 1, 1, 1, 1, 1])
             with tc1:
                 if st.button("⏸ Пауза" if st.session_state.timer_running else "▶️ Старт", use_container_width=True, key="timer_btn"):
                     st.session_state.timer_running = not st.session_state.timer_running
@@ -380,12 +380,16 @@ else:
                 if st.button("+10 сек", use_container_width=True, key="add_10"):
                     st.session_state.timer_seconds += 10
                     st.rerun()
+            with tc_res:
+                if st.button("🔄 Ресет", use_container_width=True, key="reset_timer"):
+                    st.session_state.timer_seconds = 0.0 # Повертаємо на 0:00
+                    st.session_state.timer_running = False
+                    st.rerun()
                     
             current_m = int(st.session_state.timer_seconds // 60)
             current_s = int(st.session_state.timer_seconds % 60)
             
             with tc4:
-                # ВАЖЛИВО: Видалено key="", тепер значення вільно оновлюється фоновим таймером
                 man_m = st.number_input("Хвилини" if lang == "uk" else "Minutes", min_value=0, max_value=120, value=current_m, step=1)
             with tc5:
                 man_s = st.number_input("Секунди" if lang == "uk" else "Seconds", min_value=0, max_value=59, value=current_s, step=1)
@@ -416,15 +420,26 @@ else:
             
             # --- 7.5. РОЗРАХУНОК LIVE МОДЕЛІ ---
             exp_len_safe = max(20.0, expected_length)
-            x_points = [0, 10, 15, exp_len_safe]
-            y_points = [0, exp_k10, exp_k15, raw_total] # Використовуємо raw_total з налаштувань вище
             
-            if curr_min_exact > exp_len_safe:
-                x_points.append(curr_min_exact)
-                y_points.append(raw_total + (curr_min_exact - exp_len_safe) * 1.2)
+            # ДИНАМІЧНА КОРЕКЦІЯ ЛЕЙТ-ГЕЙМУ (Late-game Dynamic Buffer)
+            # Якщо поточна хвилина наблизилася до очікуваного кінця (менше ніж за 3 хв), 
+            # або перейшла його, ми динамічно відсуваємо час завершення гри вперед.
+            live_expected_length = exp_len_safe
+            live_expected_total = raw_total
+            
+            if curr_min_exact > (exp_len_safe - 3.0):
+                # Гарантуємо, що завжди залишається хоча б 3 хвилини "буферу" для фінального файту
+                live_expected_length = curr_min_exact + 3.0
+                # Додаємо очікувані кіли за цей "овертайм" (наприклад, 0.8 кіла за кожну екстра-хвилину)
+                extra_minutes = live_expected_length - exp_len_safe
+                live_expected_total = raw_total + (extra_minutes * 0.8)
+                
+            # Будуємо криву темпу з урахуванням (можливого) овертайму
+            x_points = [0, 10, 15, live_expected_length]
+            y_points = [0, exp_k10, exp_k15, live_expected_total]
                 
             expected_at_curr_min = np.interp(curr_min_exact, x_points, y_points)
-            expected_remaining_base = max(0, raw_total - expected_at_curr_min)
+            expected_remaining_base = max(0, live_expected_total - expected_at_curr_min)
             
             # Корекція темпу (Snowball / Pace Adjustment)
             live_lead_intensity = abs((live_prob / 100.0) - 0.5) * 2.0
@@ -462,7 +477,7 @@ else:
                 "🔥 ПРОГНОЗ (LIVE ТОТАЛ)" if lang == "uk" else "🔥 LIVE PREDICTION", 
                 f"{live_prediction:.1f}"
             )
-            
+
             # --- 7.7. АВТО-ОНОВЛЕННЯ ДЛЯ ЖИВОГО ТАЙМЕРА ---
             # Якщо таймер запущено, сторінка буде автоматично оновлюватися кожну 1 секунду
             if st.session_state.timer_running:
