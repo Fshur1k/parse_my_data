@@ -243,6 +243,13 @@ else:
             
             st.dataframe(obj_data, hide_index=True, use_container_width=True)
 
+            # --- ЗБЕРЕЖЕННЯ ДАНИХ ДЛЯ LIVE-ПРЕДИКТОРУ ---
+            st.session_state['sync_team1'] = team1
+            st.session_state['sync_team2'] = team2
+            st.session_state['sync_it1'] = it1_raw  # Точне МО для команди 1
+            st.session_state['sync_it2'] = it2_raw  # Точне МО для команди 2
+            st.session_state['sync_time'] = (t1_data['gamelength'].median() / 60 + t2_data['gamelength'].median() / 60) / 2
+
             # --- 6. РОЗШИРЕНИЙ РОЗПИС (АЛЬТЕРНАТИВНІ ЛІНІЇ КІЛІВ) ---
             st.markdown("---")
             st.subheader("📈 Розширений розпис (Альтернативні лінії)" if lang == "uk" else "📈 Alternative Markets")

@@ -68,15 +68,26 @@ if not t1_data.empty and not t2_data.empty:
     # --- 2. ВВІД PRE-MATCH ОЧІКУВАНЬ (ЛІНІЯ ЗАКРИТТЯ) ---
     st.markdown("---")
     st.subheader("📝 Pre-match Лінія (Очікування до матчу)" if lang == "uk" else "📝 Pre-match Line (Expectations)")
-    st.caption("Значення заповнені історичною медіаною. Відредагуйте їх відповідно до лінії букмекера перед стартом." if lang == "uk" else "Values pre-filled with historical medians. Edit them according to the pre-match bookmaker line.")
+    
+    # ПЕРЕВІРКА: Чи є збережені дані з профілю для цих же команд?
+    if st.session_state.get('sync_team1') == team1 and st.session_state.get('sync_team2') == team2:
+        st.success("✅ Дані успішно синхронізовано з вкладки 'Team Profile'!" if lang == "uk" else "✅ Data successfully synced from 'Team Profile'!")
+        def_k1 = float(st.session_state.get('sync_it1', hist_t1_k))
+        def_k2 = float(st.session_state.get('sync_it2', hist_t2_k))
+        def_time = float(st.session_state.get('sync_time', hist_len))
+    else:
+        st.caption("Значення заповнені історичною медіаною. Відредагуйте їх відповідно до лінії букмекера перед стартом." if lang == "uk" else "Values pre-filled with historical medians. Edit them according to the pre-match bookmaker line.")
+        def_k1 = float(hist_t1_k)
+        def_k2 = float(hist_t2_k)
+        def_time = float(hist_len)
     
     pm_c1, pm_c2, pm_c3 = st.columns(3)
     with pm_c1:
-        exp_k1 = st.number_input(f"Інд. Тотал {team1}:", min_value=0.5, max_value=50.0, value=hist_t1_k, step=0.5)
+        exp_k1 = st.number_input(f"Інд. Тотал {team1}:", min_value=0.5, max_value=50.0, value=def_k1, step=0.5)
     with pm_c2:
-        exp_k2 = st.number_input(f"Інд. Тотал {team2}:", min_value=0.5, max_value=50.0, value=hist_t2_k, step=0.5)
+        exp_k2 = st.number_input(f"Інд. Тотал {team2}:", min_value=0.5, max_value=50.0, value=def_k2, step=0.5)
     with pm_c3:
-        expected_length = st.number_input("Очікуваний час гри (Хв):" if lang == "uk" else "Expected Game Time (Min):", min_value=15.0, max_value=60.0, value=hist_len, step=0.5)
+        expected_length = st.number_input("Очікуваний час гри (Хв):" if lang == "uk" else "Expected Game Time (Min):", min_value=15.0, max_value=60.0, value=def_time, step=0.5)
     
     expected_total = exp_k1 + exp_k2
     
