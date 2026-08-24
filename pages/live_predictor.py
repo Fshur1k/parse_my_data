@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import time
 
 st.set_page_config(page_title="Live Предикт | LoL", layout="wide")
 
@@ -60,50 +61,96 @@ if not t1_data.empty and not t2_data.empty:
     t2_total_med = safe_median(t2_data['kills'] + t2_data['deaths'])
     expected_total = (t1_total_med + t2_total_med) / 2
 
-    # --- 2. ВВІД LIVE-ДАНИХ ТА ОЦІНКА СИЛИ ---
+    # --- СТАН ТАЙМЕРА ---
+    if 'timer_running' not in st.session_state: 
+        st.session_state.timer_running = False
+    if 'timer_seconds' not in st.session_state: 
+        st.session_state.timer_seconds = 15.0 * 60.0 # За замовчуванням 15:00
+    if 'last_tick' not in st.session_state: 
+        st.session_state.last_tick = time.time()
+
+    # Оновлення фонового часу
+    now = time.time()
+    if st.session_state.timer_running:
+        st.session_state.timer_seconds += (now - st.session_state.last_tick)
+    st.session_state.last_tick = now
+
+    # --- 2. ВВІД LIVE-ДАНИХ (ТАЙМЕР ТА КІЛИ) ---
     st.markdown("---")
-    st.subheader("⏱️ Live Ситуація" if lang == "uk" else "⏱️ Live Situation")
+    st.subheader("⏱️ Live Таймер та Рахунок" if lang == "uk" else "⏱️ Live Timer & Score")
     
-    col_t, col_k1, col_k2 = st.columns(3)
-    curr_min = col_t.number_input("Поточна хвилина (Min):" if lang == "uk" else "Current Minute:", min_value=1, max_value=60, value=15, step=1)
-    curr_k1 = col_k1.number_input(f"Кіли {team1}:", min_value=0, max_value=50, value=5, step=1)
-    curr_k2 = col_k2.number_input(f"Кіли {team2}:", min_value=0, max_value=50, value=5, step=1)
+    # Кнопки управління таймером
+    tc1, tc2, tc3, tc4, tc5 = st.columns([1, 1, 1, 1, 1])
+    with tc1:
+        if st.button("⏸ Пауза" if st.session_state.timer_running else "▶️ Старт", use_container_width=True):
+            st.session_state.timer_running = not st.session_state.timer_running
+            st.rerun()
+    with tc2:
+        if st.button("-10 сек", use_container_width=True):
+            st.session_state.timer_seconds = max(0.0, st.session_state.timer_seconds - 10)
+            st.rerun()
+    with tc3:
+        if st.button("+10 сек", use_container_width=True):
+            st.session_state.timer_seconds += 10
+            st.rerun()
+            
+    # Ручне введення часу
+    current_m = int(st.session_state.timer_seconds // 60)
+    current_s = int(st.session_state.timer_seconds % 60)
+    
+    with tc4:
+        man_m = st.number_input("Хвилини" if lang == "uk" else "Minutes", min_value=0, max_value=120, value=current_m, step=1)
+    with tc5:
+        man_s = st.number_input("Секунди" if lang == "uk" else "Seconds", min_value=0, max_value=59, value=current_s, step=1)
+
+    # Синхронізація ручного введення з внутрішнім станом
+    if man_m != current_m or man_s != current_s:
+        st.session_state.timer_seconds = man_m * 60 + man_s
+        st.rerun()
+
+    # Точний дробовий час для математичної моделі
+    curr_min_exact = st.session_state.timer_seconds / 60.0
+
+    st.caption("💡 *Коли таймер запущено, він працює у фоні. Інтерфейс оновлюється щоразу, коли ви змінюєте кіли або натискаєте будь-яку кнопку.*" if lang == "uk" else "💡 *Timer runs in background. UI updates whenever you change kills or click a button.*")
+
+    # --- 3. ОЦІНКА СИЛИ ТА РАХУНОК ---
+    c_k1, c_k2, c_str = st.columns([1, 1, 2])
+    with c_k1:
+        curr_k1 = st.number_input(f"⚔️ Кіли {team1}:", min_value=0, max_value=100, value=5, step=1)
+    with c_k2:
+        curr_k2 = st.number_input(f"⚔️ Кіли {team2}:", min_value=0, max_value=100, value=5, step=1)
+    with c_str:
+        # Компактне виставлення сили через number_input
+        live_prob = st.number_input(
+            f"⚖️ Шанс на перемогу {team1} (%)" if lang == "uk" else f"⚖️ Win Prob {team1} (%)",
+            min_value=1, max_value=99, value=50, step=1,
+            help="Використовуйте кнопки +/- для точного налаштування. 50% = Рівна гра." if lang == "uk" else "Use +/- for precise tuning. 50% = Even game."
+        )
     
     current_total = curr_k1 + curr_k2
     
-    st.write("⚖️ **Оцінка поточної переваги (Золото, Дракони, Темп)**" if lang == "uk" else "⚖️ **Live Game State Assessment (Gold, Drakes, Pace)**")
-    
-    live_prob = st.slider(
-        f"Шанс на перемогу {team1} у цій грі (%)" if lang == "uk" else f"Win Probability for {team1} (%)",
-        min_value=1, max_value=99, value=50, step=1,
-        help="Оцініть реальну силу команд на карті зараз. 50% - рівна гра. 80%+ - жорстка домінація однієї з команд." if lang == "uk" else "Assess the real power on the map right now. 50% = Even game. 80%+ = Heavy stomp."
-    )
-    
-    # --- 3. МАТЕМАТИЧНА МОДЕЛЬ ТЕМПУ ---
+    # --- 4. МАТЕМАТИЧНА МОДЕЛЬ ТЕМПУ ---
     exp_len_safe = max(20.0, expected_length)
     x_points = [0, 10, 15, exp_len_safe]
     y_points = [0, exp_k10, exp_k15, expected_total]
     
-    if curr_min > exp_len_safe:
-        x_points.append(curr_min)
-        y_points.append(expected_total + (curr_min - exp_len_safe) * 1.2)
+    if curr_min_exact > exp_len_safe:
+        x_points.append(curr_min_exact)
+        y_points.append(expected_total + (curr_min_exact - exp_len_safe) * 1.2)
         
-    expected_at_curr_min = np.interp(curr_min, x_points, y_points)
+    # Використовуємо точний час (з секундами) для максимально плавного предикту
+    expected_at_curr_min = np.interp(curr_min_exact, x_points, y_points)
     expected_remaining_base = max(0, expected_total - expected_at_curr_min)
     
-    # --- 4. МАНУАЛЬНА СНОУБОЛ КОРЕКЦІЯ ---
-    # Перетворюємо вірогідність (1-99) в індекс домінації від 0.0 (рівна гра) до 1.0 (повний розгром)
+    # --- 5. МАНУАЛЬНА СНОУБОЛ КОРЕКЦІЯ ---
     live_lead_intensity = abs((live_prob / 100.0) - 0.5) * 2.0
-    
-    # Максимальне "зрізання" кілів, якщо команда знищує іншу (до 55% зрізки залишку при 99% вірогідності)
     max_penalty = 0.55
-    
     snowball_mult = 1.0 - (live_lead_intensity * max_penalty)
     adjusted_remaining = expected_remaining_base * snowball_mult
     
     live_prediction = current_total + adjusted_remaining
 
-    # --- 5. ВІЗУАЛІЗАЦІЯ ---
+    # --- 6. ВІЗУАЛІЗАЦІЯ ---
     st.markdown("---")
     st.subheader("📊 Live Предикт" if lang == "uk" else "📊 Live Prediction")
     
