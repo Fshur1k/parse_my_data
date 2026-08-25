@@ -403,10 +403,8 @@ else:
             # --- 7.4. ОЦІНКА СИЛИ ТА КІЛИ ---
             c_k1, c_k2, c_str = st.columns([1, 1, 2])
             with c_k1:
-                # ЗМІНА: Встановили value=0, щоб гра завжди починалася з нулів
                 curr_k1 = st.number_input(f"⚔️ Кіли {team1}:", min_value=0, max_value=100, value=0, step=1, key="curr_k1")
             with c_k2:
-                # ЗМІНА: Встановили value=0
                 curr_k2 = st.number_input(f"⚔️ Кіли {team2}:", min_value=0, max_value=100, value=0, step=1, key="curr_k2")
             with c_str:
                 live_prob = st.number_input(
@@ -415,71 +413,100 @@ else:
                     help="50% = Рівна гра. Враховуйте золото та драконів." if lang == "uk" else "50% = Even game. Consider gold and dragons."
                 )
             
-            # Чіткий підрахунок поточних кілів
+            # --- ДОДАТКОВІ КОРЕКЦІЇ (ВХІДНІ ДАНІ) ---
+            with st.expander("⚙️ Розширені налаштування Live-моделі (Корекція)" if lang == "uk" else "⚙️ Advanced Live Settings (Correction)"):
+                adv_c1, adv_c2 = st.columns(2)
+                with adv_c1:
+                    snowball_power = st.slider(
+                        "Сила ефекту Сноуболу (Штраф за домінацію)" if lang == "uk" else "Snowball Effect Strength", 
+                        min_value=0.0, max_value=2.0, value=0.6, step=0.1, key="snowball_power",
+                        help="1.0 - стандарт. 0.5 - вдвічі слабший штраф (залишає кіли для команди, що програє). 0.0 - відключити штраф взагалі." if lang == "uk" else "1.0 - default. 0.0 - disable penalty completely."
+                    )
+                with adv_c2:
+                    pace_modifier = st.slider(
+                        "Корекція базового темпу (Множник)" if lang == "uk" else "Base Pace Multiplier", 
+                        min_value=0.5, max_value=2.0, value=1.0, step=0.05, key="pace_modifier",
+                        help="1.0 - стандартний темп. 1.2 = збільшити очікування матчу на 20% (якщо йде фієста)." if lang == "uk" else "1.0 - normal pace. 1.2 = increase match expectations by 20%."
+                    )
+            
             current_total = curr_k1 + curr_k2
             
             # --- 7.5. РОЗРАХУНОК LIVE МОДЕЛІ ---
             exp_len_safe = max(20.0, expected_length)
             
-            # ДИНАМІЧНА КОРЕКЦІЯ ЛЕЙТ-ГЕЙМУ (Late-game Dynamic Buffer)
-            # Якщо поточна хвилина наблизилася до очікуваного кінця (менше ніж за 3 хв), 
-            # або перейшла його, ми динамічно відсуваємо час завершення гри вперед.
             live_expected_length = exp_len_safe
             live_expected_total = raw_total
             
             if curr_min_exact > (exp_len_safe - 3.0):
-                # Гарантуємо, що завжди залишається хоча б 3 хвилини "буферу" для фінального файту
                 live_expected_length = curr_min_exact + 3.0
-                # Додаємо очікувані кіли за цей "овертайм" (наприклад, 0.8 кіла за кожну екстра-хвилину)
                 extra_minutes = live_expected_length - exp_len_safe
                 live_expected_total = raw_total + (extra_minutes * 0.8)
                 
-            # Будуємо криву темпу з урахуванням (можливого) овертайму
+            # Застосовуємо ручну корекцію вхідного темпу (Pace Modifier)
+            adj_exp_k10 = exp_k10 * pace_modifier
+            adj_exp_k15 = exp_k15 * pace_modifier
+            adj_live_expected_total = live_expected_total * pace_modifier
+                
             x_points = [0, 10, 15, live_expected_length]
-            y_points = [0, exp_k10, exp_k15, live_expected_total]
+            y_points = [0, adj_exp_k10, adj_exp_k15, adj_live_expected_total]
                 
             expected_at_curr_min = np.interp(curr_min_exact, x_points, y_points)
-            expected_remaining_base = max(0, live_expected_total - expected_at_curr_min)
+            expected_remaining_base = max(0, adj_live_expected_total - expected_at_curr_min)
             
-            # Корекція темпу (Snowball / Pace Adjustment)
+            # Корекція темпу (Snowball / Pace Adjustment) з ручним регулятором
             live_lead_intensity = abs((live_prob / 100.0) - 0.5) * 2.0
-            
-            # ФАКТОР ЧАСУ: На 0-й хвилині вплив відриву = 0. 
-            # Максимально впливає на темп після 15-ї хвилини.
             time_factor = min(1.0, curr_min_exact / 15.0)
             
-            max_penalty = 0.55
+            # Стандартний максимальний штраф (0.55), помножений на твій повзунок
+            max_penalty = 0.55 * snowball_power
             snowball_mult = 1.0 - (live_lead_intensity * max_penalty * time_factor)
-            adjusted_remaining = expected_remaining_base * snowball_mult
             
-            # Фінальний прогноз: Поточні реальні кіли + Скоригований залишок
+            # Захист від від'ємних значень
+            snowball_mult = max(0.1, snowball_mult) 
+            
+            adjusted_remaining = expected_remaining_base * snowball_mult
             live_prediction = current_total + adjusted_remaining
+
+            # РОЗПОДІЛ ІНДИВІДУАЛЬНИХ ТОТАЛІВ ДЛЯ ЛАЙВУ
+            # Базові долі кілів (наприклад, 60% робить команда 1, 40% - команда 2)
+            base_t1_share = it1_raw / raw_total if raw_total > 0 else 0.5
+            
+            # Коригуємо долю в залежності від того, хто домінує в лайві
+            live_t1_share = base_t1_share + (live_prob / 100.0 - t1_prob) * 0.4
+            live_t1_share = max(0.1, min(0.9, live_t1_share)) # Не даємо впасти нижче 10%
+            live_t2_share = 1.0 - live_t1_share
+            
+            live_pred_it1 = curr_k1 + (adjusted_remaining * live_t1_share)
+            live_pred_it2 = curr_k2 + (adjusted_remaining * live_t2_share)
 
             # --- 7.6. ВІЗУАЛІЗАЦІЯ ПРЕДИКТУ ---
             res_c1, res_c2, res_c3 = st.columns(3)
             res_c1.metric(
-                "Залишок кілів (До корекції)" if lang == "uk" else "Remaining Kills (Base)", 
-                f"{expected_remaining_base:.1f}"
+                "Залишок кілів (База)" if lang == "uk" else "Remaining Kills (Base)", 
+                f"{expected_remaining_base:.1f}",
+                delta=f"Темп: {pace_modifier}x" if pace_modifier != 1.0 else None,
+                delta_color="normal"
             )
             
             snowball_diff = adjusted_remaining - expected_remaining_base
-            penalty_text = "Рівна гра" if live_lead_intensity < 0.1 else "Відрив по макро"
-            if lang == "en": penalty_text = "Even game" if live_lead_intensity < 0.1 else "Macro Lead Penalty"
+            penalty_text = "Без штрафу" if live_lead_intensity < 0.1 else f"Зрізано через макро"
             
             res_c2.metric(
-                "Скор. Залишок (Корекція сили)" if lang == "uk" else "Adj. Remaining (Pace Correction)", 
+                "Скор. Залишок (Сноубол)" if lang == "uk" else "Adj. Remaining (Pace)", 
                 f"{adjusted_remaining:.1f}", 
                 delta=f"{snowball_diff:.1f} ({penalty_text})", 
-                delta_color="inverse" if snowball_diff < 0 else "normal"
+                delta_color="inverse" if snowball_diff < 0 else "off"
             )
             
             res_c3.metric(
                 "🔥 ПРОГНОЗ (LIVE ТОТАЛ)" if lang == "uk" else "🔥 LIVE PREDICTION", 
                 f"{live_prediction:.1f}"
             )
-
-            # --- 7.7. АВТО-ОНОВЛЕННЯ ДЛЯ ЖИВОГО ТАЙМЕРА ---
-            # Якщо таймер запущено, сторінка буде автоматично оновлюватися кожну 1 секунду
-            if st.session_state.timer_running:
-                time.sleep(1)
-                st.rerun()
+            
+            # Вивід індивідуальних лайв-предиктів під загальним
+            st.caption("Індивідуальні прогнози (Live Individual Totals):" if lang == "uk" else "Individual Live Totals:")
+            it_c1, it_c2 = st.columns(2)
+            with it_c1:
+                st.info(f"**{team1}**: {live_pred_it1:.1f}")
+            with it_c2:
+                st.error(f"**{team2}**: {live_pred_it2:.1f}")
