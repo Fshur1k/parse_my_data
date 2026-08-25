@@ -87,12 +87,27 @@ def append_to_sheet(url, sheet, rows):
         client = get_gspread_client()
         ws = client.open_by_url(url).worksheet(sheet)
         if not ws.get_all_values():
-            ws.append_row(['Patch', 'Date', 'Match start time', 'Tournament', 'Map number', 'Team 1', 'Team 2', 'Team 1 baseline (%)', 'Map winner', 'Team 1 kills', 'Team 2 kills', 'Total kills', 'Total minutes', 'FB', 'F10', '1st tower', 'Total towers', '1st dragon', 'Total dragons', '1st nashor', 'Total nashors', '1st inhibitor', 'Total inhibitors', 'Last pick map winner', 'Red side map winner'])
+            # ОНОВЛЕНІ ЗАГОЛОВКИ (Новий порядок)
+            ws.append_row([
+                'Patch', 'Date', 'Match start time', 'Liquipedia tier', 'Tournament', 
+                'Stage', 'Map number', 'Team 1', 'Team 2', 'Team 1 baseline (%)', 
+                'Map winner', 'Team 1 kills', 'Team 2 kills', 'Total kills', 
+                'Total minutes', 'FB', 'F10', '1st tower', 'Total towers', 
+                '1st dragon', 'Total dragons', '1st nashor', 'Total nashors', 
+                '1st inhibitor', 'Total inhibitors', 'Last pick map winner', 'Red side map winner'
+            ])
         init_count = len(ws.get_all_values())
         ws.append_rows([list(r.values()) for r in rows])
         if len(ws.get_all_values()) == init_count + len(rows): return True, "Успішно додано!"
         return False, "Помилка запису."
     except Exception as e: return False, str(e)
+
+def get_liquipedia_tier(league):
+    """Визначає тір турніру на основі ліги"""
+    l = str(league).upper()
+    if l in ['LCK', 'LPL', 'LEC', 'MSI', 'WCS']: return '1(S)'
+    if l in ['LCS', 'CBLOL', 'PCS', 'VCS', 'LLA', 'LJL', 'EMEA MASTERS']: return '2(A)'
+    return '3(B,C,Qual)'
 
 def parse_games(df_games):
     parsed = []
@@ -109,18 +124,39 @@ def parse_games(df_games):
             d_str = str(b['date'])
             ts = int(b.get('gamelength', 0))
             
+            # Визначаємо стадію та тір
+            is_playoff = b.get('playoffs', 0) == 1
+            stage = "Playoff" if is_playoff else "Group Stage"
+            tier = get_liquipedia_tier(b['league'])
+            
             parsed.append({
-                'Patch': str(b.get('patch', '')).replace(',', '.'), 'Date': d_str.split(' ')[0] if ' ' in d_str else d_str,
-                'Match start time': d_str.split(' ')[1] if ' ' in d_str else '12:00:00', 'Tournament': b['league'],
-                'Map number': int(m_num), 'Team 1': b['teamname'], 'Team 2': r['teamname'], 'Team 1 baseline (%)': '50%',
-                'Map winner': b['teamname'] if b['result'] == 1 else r['teamname'], 'Team 1 kills': t1_k, 'Team 2 kills': t2_k,
-                'Total kills': t1_k + t2_k, 'Total minutes': f"{ts//60:02d}:{ts%60:02d}",
-                'FB': b['teamname'] if b['firstblood'] == 1 else (r['teamname'] if r['firstblood'] == 1 else 'None'), 'F10': f10,
-                '1st tower': b['teamname'] if b['firsttower'] == 1 else (r['teamname'] if r['firsttower'] == 1 else 'None'), 'Total towers': int(b['towers'] + r['towers']),
-                '1st dragon': b['teamname'] if b['firstdragon'] == 1 else (r['teamname'] if r['firstdragon'] == 1 else 'None'), 'Total dragons': int(b['dragons'] + r['dragons']),
-                '1st nashor': b['teamname'] if b['firstbaron'] == 1 else (r['teamname'] if r['firstbaron'] == 1 else 'None'), 'Total nashors': int(b['barons'] + r['barons']),
-                '1st inhibitor': f_inh, 'Total inhibitors': b_inh + r_inh,
-                'Last pick map winner': "YES" if r['result'] == 1 else "NO", 'Red side map winner': "YES" if r['result'] == 1 else "NO"
+                'Patch': str(b.get('patch', '')).replace(',', '.'), 
+                'Date': d_str.split(' ')[0] if ' ' in d_str else d_str,
+                'Match start time': d_str.split(' ')[1] if ' ' in d_str else '12:00:00', 
+                'Liquipedia tier': tier,
+                'Tournament': b['league'],
+                'Stage': stage,
+                'Map number': int(m_num), 
+                'Team 1': b['teamname'], 
+                'Team 2': r['teamname'], 
+                'Team 1 baseline (%)': '50%',
+                'Map winner': b['teamname'] if b['result'] == 1 else r['teamname'], 
+                'Team 1 kills': t1_k, 
+                'Team 2 kills': t2_k,
+                'Total kills': t1_k + t2_k, 
+                'Total minutes': f"{ts//60:02d}:{ts%60:02d}",
+                'FB': b['teamname'] if b['firstblood'] == 1 else (r['teamname'] if r['firstblood'] == 1 else 'None'), 
+                'F10': f10,
+                '1st tower': b['teamname'] if b['firsttower'] == 1 else (r['teamname'] if r['firsttower'] == 1 else 'None'), 
+                'Total towers': int(b['towers'] + r['towers']),
+                '1st dragon': b['teamname'] if b['firstdragon'] == 1 else (r['teamname'] if r['firstdragon'] == 1 else 'None'), 
+                'Total dragons': int(b['dragons'] + r['dragons']),
+                '1st nashor': b['teamname'] if b['firstbaron'] == 1 else (r['teamname'] if r['firstbaron'] == 1 else 'None'), 
+                'Total nashors': int(b['barons'] + r['barons']),
+                '1st inhibitor': f_inh, 
+                'Total inhibitors': b_inh + r_inh,
+                'Last pick map winner': "YES" if r['result'] == 1 else "NO", # Зазвичай червона сторона має ласт пік
+                'Red side map winner': "YES" if r['result'] == 1 else "NO"
             })
     return parsed
 
