@@ -116,7 +116,7 @@ def parse_games(df_games):
             b, r = m_map[m_map['side'] == 'Blue'].iloc[0], m_map[m_map['side'] == 'Red'].iloc[0]
             t1_k, t2_k = int(b['kills']), int(r['kills'])
             
-            f10 = b['teamname'] if t1_k >= 10 and t2_k < 10 else (r['teamname'] if t2_k >= 10 and t1_k < 10 else ('None' if t1_k < 10 and t2_k < 10 else 'N/A'))
+            f10 = b['teamname'] if t1_k >= 10 and t2_k < 10 else (r['teamname'] if t2_k >= 10 and t1_k < 10 else ('None' if t1_k < 10 and t2_k < 10 else 'None'))
             
             b_inh, r_inh = int(b.get('inhibitors', 0)), int(r.get('inhibitors', 0))
             f_inh = b['teamname'] if b.get('firstinhibitor') == 1 or (b_inh > 0 and r_inh == 0) else (r['teamname'] if r.get('firstinhibitor') == 1 or (r_inh > 0 and b_inh == 0) else 'None')
@@ -126,7 +126,7 @@ def parse_games(df_games):
             
             # Визначаємо стадію та тір
             is_playoff = b.get('playoffs', 0) == 1
-            stage = "Playoff" if is_playoff else "Group Stage"
+            stage = "Playoffs" if is_playoff else "Group Stage"
             tier = get_liquipedia_tier(b['league'])
             
             parsed.append({
@@ -155,8 +155,8 @@ def parse_games(df_games):
                 'Total nashors': int(b['barons'] + r['barons']),
                 '1st inhibitor': f_inh, 
                 'Total inhibitors': b_inh + r_inh,
-                'Last pick map winner': "YES" if r['result'] == 1 else "NO", # Зазвичай червона сторона має ласт пік
-                'Red side map winner': "YES" if r['result'] == 1 else "NO"
+                'Last pick map winner': "Yes" if r['result'] == 1 else "NO", # Зазвичай червона сторона має ласт пік
+                'Red side map winner': "Yes" if r['result'] == 1 else "NO"
             })
     return parsed
 
