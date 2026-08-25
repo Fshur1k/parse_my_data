@@ -142,22 +142,45 @@ if df is not None:
 
 # Залишаємо можливість завантажити новий файл для оновлення
 with st.sidebar.expander("📁 Завантажити новий файл" if lang == "uk" else "📁 Upload new file"):
-    uploaded_file = st.file_uploader("CSV", type=['csv'], label_visibility="collapsed")
-    if uploaded_file: 
+    # ВИПРАВЛЕННЯ 1: Дозволяємо завантажувати і csv, і zip
+    uploaded_file = st.file_uploader("CSV / ZIP", type=['csv', 'zip'], label_visibility="collapsed")
+    
+    # ВИПРАВЛЕННЯ 2: Запобіжник від нескінченного циклу
+    # Перевіряємо, чи ми вже завантажували САМЕ ЦЕЙ файл
+    if uploaded_file and st.session_state.get('uploaded_filename') != uploaded_file.name: 
         st.session_state['df'] = load_csv(uploaded_file)
-        st.rerun() # Оновлюємо сторінку одразу після завантаження
+        st.session_state['uploaded_filename'] = uploaded_file.name # Запам'ятовуємо ім'я
+        st.rerun() # Оновлюємо сторінку лише ОДИН раз
 
 if df is not None:
     t_df = df[df['position'] == 'team'].copy()
-    all_t = sorted(t_df['league'].dropna().unique().tolist())
-    sel_t = st.multiselect("🏆 Турніри / Tournaments:", options=all_t, default=['LEC', 'LCK', 'LPL'] if all(x in all_t for x in ['LEC', 'LCK', 'LPL']) else all_t[:3])
     
+    # 1. СПОЧАТКУ запитуємо дати (щоб відфільтрувати турніри)
     md, mxd = t_df['date_only'].min(), t_df['date_only'].max()
     s_dates = st.date_input("📅 Дати / Dates:", value=(md, mxd), min_value=md, max_value=mxd)
-    sd = ed = s_dates[0] if isinstance(s_dates, (list, tuple)) else s_dates
-    if isinstance(s_dates, tuple) and len(s_dates) == 2: sd, ed = s_dates
+    
+    # Безпечне розпакування дат (якщо обрано лише 1 день або проміжок)
+    if isinstance(s_dates, (list, tuple)):
+        if len(s_dates) == 0: sd = ed = md
+        elif len(s_dates) == 1: sd = ed = s_dates[0]
+        else: sd, ed = s_dates[:2]
+    else:
+        sd = ed = s_dates
         
-    f_df = t_df[(t_df['league'].isin(sel_t)) & (t_df['date_only'] >= sd) & (t_df['date_only'] <= ed)]
+    # 2. Фільтруємо базу ТІЛЬКИ по датах, щоб отримати актуальні турніри в ці дні
+    date_f_df = t_df[(t_df['date_only'] >= sd) & (t_df['date_only'] <= ed)]
+    
+    all_t = sorted(date_f_df['league'].dropna().unique().tolist())
+    
+    # Визначаємо дефолтні турніри безпечно
+    default_t = [t for t in ['LEC', 'LCK', 'LPL'] if t in all_t]
+    if not default_t: default_t = all_t[:3]
+    
+    # 3. Вибір турнірів (тепер список вже відфільтрований за обраними датами)
+    sel_t = st.multiselect("🏆 Турніри / Tournaments:", options=all_t, default=default_t)
+    
+    # 4. Фінальна вибірка: і по датах, і по турнірах
+    f_df = date_f_df[date_f_df['league'].isin(sel_t)]
     
     if not f_df.empty:
         s_info = {}
@@ -169,7 +192,18 @@ if df is not None:
             s_info[k]['ids'].append(gid)
             
         opts = {k: f"{v['name']} ({len(v['ids'])} карт)" for k, v in s_info.items()}
-        sel_s = st.multiselect("⚔️ Матчі / Matches:", options=list(opts.keys()), format_func=lambda x: opts[x], default=list(opts.keys())[:3])
+        
+        # 5. ДИНАМІЧНИЙ КЛЮЧ: якщо дати або турнір змінюються, ключ стає іншим. 
+        # Це змушує Streamlit "забути" старі матчі і відмалювати список начисто.
+        dynamic_key = f"matches_{sd}_{ed}_{'-'.join(sel_t)}"
+        
+        sel_s = st.multiselect(
+            "⚔️ Матчі / Matches:", 
+            options=list(opts.keys()), 
+            format_func=lambda x: opts[x], 
+            default=list(opts.keys())[:3],
+            key=dynamic_key
+        )
         
         if sel_s:
             ids = [gid for k in sel_s for gid in s_info[k]['ids']]
@@ -186,3 +220,5 @@ if df is not None:
                     succ, msg = append_to_sheet(st.session_state['sheet_url'], st.session_state['sheet_name'], p_df.to_dict('records'))
                     if succ: st.success(msg)
                     else: st.error(msg)
+    else:
+        st.warning("За обраними фільтрами не знайдено матчів." if lang == "uk" else "No matches found for the selected filters.")
