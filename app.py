@@ -105,8 +105,8 @@ def append_to_sheet(url, sheet, rows):
 def get_liquipedia_tier(league):
     """Визначає тір турніру на основі ліги"""
     l = str(league).upper()
-    if l in ['LCK', 'LPL', 'LEC', 'MSI', 'WCS']: return '1(S)'
-    if l in ['LCS', 'CBLOL', 'PCS', 'VCS', 'LLA', 'LJL', 'EMEA MASTERS']: return '2(A)'
+    if l in ['LCK', 'LPL', 'LEC', 'MSI', 'WCS', 'LCS', 'CBLOL']: return '1(S)'
+    if l in ['LCP', 'PCS', 'LCKC', 'VCS', 'LLA', 'LJL', 'EMEA MASTERS']: return '2(A)'
     return '3(B,C,Qual)'
 
 def parse_games(df_games):
