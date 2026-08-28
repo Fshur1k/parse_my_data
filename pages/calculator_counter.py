@@ -2,6 +2,8 @@ import itertools
 import streamlit as st
 import pandas as pd
 
+from data_loader import DEFAULT_FILE_PATH, get_active_dataframe
+
 st.set_page_config(page_title="Калькулятор Піків | LoL", layout="wide")
 
 lang_choice = st.sidebar.radio("Language", ["Українська", "English"], label_visibility="collapsed")
@@ -41,8 +43,8 @@ def icon_html(champion_name, size=20):
         return ""
     return f'<img src="{url}" width="{size}" style="vertical-align:middle;border-radius:3px;margin-right:4px;">'
 
-# Беремо дані з кешу сесії (якщо завантажено на першій сторінці)
-df = st.session_state.get('df', None)
+# Беремо спільний датасет (єдина копія на весь застосунок, а не на кожну сесію)
+df = get_active_dataframe(DEFAULT_FILE_PATH)
 
 if df is None:
     st.info("👋 Завантажте файл бази на головній сторінці, щоб використовувати калькулятор." if lang == "uk" else "👋 Load the database file on the main page to use the calculator.")
@@ -272,7 +274,7 @@ else:
             sub = fp[fp['champion'].isin(champ_list)]
             if sub.empty:
                 return None
-            return sub.groupby('patch')['result'].mean() * 100
+            return sub.groupby('patch', observed=True)['result'].mean() * 100
 
         t1_trend = team_rating_by_patch(team1_champs)
         t2_trend = team_rating_by_patch(team2_champs)
@@ -285,6 +287,20 @@ else:
             rating_df = pd.DataFrame(rating_series)
             rating_df = rating_df.reindex(sorted(rating_df.index.tolist(), key=patch_val))
             st.line_chart(rating_df)
+
+            # Aggregate readout: the line chart alone doesn't label its endpoints,
+            # so surface the average WR and the direction of travel explicitly.
+            agg_cols = st.columns(len(rating_series))
+            for agg_col, (name, _series) in zip(agg_cols, rating_series.items()):
+                ordered = rating_df[name].dropna()
+                avg_val = ordered.mean() if not ordered.empty else None
+                trend_delta = ordered.iloc[-1] - ordered.iloc[0] if len(ordered) >= 2 else None
+                with agg_col:
+                    st.metric(
+                        f"{name}: {'середній WR' if lang == 'uk' else 'avg WR'}",
+                        f"{avg_val:.0f}%" if avg_val is not None else "—",
+                        delta=f"{trend_delta:+.0f}pp" if trend_delta is not None else None,
+                    )
         else:
             st.caption(
                 "Оберіть героїв хоча б для однієї команди, щоб побачити тренд рейтингу." if lang == "uk"
@@ -353,6 +369,20 @@ else:
         if dist_series:
             dist_df = pd.DataFrame(dist_series)
             st.bar_chart(dist_df)
+
+            # Aggregate readout: the bar chart shows shape, not the summed total
+            # or which phase carries the most weight — spell both out.
+            agg_cols = st.columns(len(dist_series))
+            for agg_col, (name, series) in zip(agg_cols, dist_series.items()):
+                total = series.sum()
+                peak_phase = series.idxmax() if not series.empty and series.sum() > 0 else None
+                with agg_col:
+                    st.metric(
+                        f"{name}: {'прогноз тоталу' if lang == 'uk' else 'projected total'}",
+                        f"{total:.1f}",
+                    )
+                    if peak_phase is not None:
+                        st.caption(f"{'Пік' if lang == 'uk' else 'Peak'}: {peak_phase}")
         else:
             st.caption(
                 "Оберіть героїв хоча б для однієї команди, щоб побачити розподіл кілів." if lang == "uk"
@@ -385,7 +415,7 @@ else:
                 else "Matchup data (gameid/side) isn't available in the loaded dataset."
             )
         else:
-            @st.cache_data(show_spinner=False)
+            @st.cache_data(show_spinner=False, ttl=1800, max_entries=20)
             def build_role_matchup_table(fp_role, role):
                 """Self-join same game, opposite side, same role -> pair records with result."""
                 left = fp_role[['gameid', 'side', 'champion', 'result']].rename(
@@ -398,7 +428,7 @@ else:
                 merged = merged[merged['side_a'] != merged['side_b']]
                 if merged.empty:
                     return merged
-                agg = merged.groupby(['champion_a', 'champion_b']).agg(
+                agg = merged.groupby(['champion_a', 'champion_b'], observed=True).agg(
                     win_rate=('result_a', 'mean'), games=('result_a', 'size')
                 ).reset_index()
                 return agg
@@ -539,7 +569,7 @@ else:
             # already stage/date/patch-filtered fp); fall back to the broader pool if too thin.
             # [Assuming "matchup" = the specific team1-vs-team2 pairing selected above, since
             #  the dataset has no other explicit head-to-head/series identifier.]
-            @st.cache_data(show_spinner=False)
+            @st.cache_data(show_spinner=False, ttl=1800, max_entries=20)
             def scope_to_matchup(fp_all, t1, t2):
                 pair_games = fp_all[fp_all['teamname'].isin([t1, t2])].groupby('gameid')['teamname'].nunique()
                 gids = pair_games[pair_games == 2].index
@@ -555,22 +585,25 @@ else:
                 syn_source = fp
                 syn_src_label = "Ліги" if lang == "uk" else "League"
 
-            @st.cache_data(show_spinner=False)
+            @st.cache_data(show_spinner=False, ttl=1800, max_entries=20)
             def build_teammate_synergy(fp_scope):
                 """Residual synergy: observed teammate win rate minus each champ's solo baseline."""
                 base = fp_scope[['gameid', 'side', 'champion', 'result']].dropna(subset=['champion'])
                 if base.empty:
                     return pd.DataFrame(), pd.Series(dtype=float)
-                champ_wr = base.groupby('champion')['result'].mean()
+                champ_wr = base.groupby('champion', observed=True)['result'].mean()
 
                 left = base.rename(columns={'champion': 'champion_x', 'result': 'result_x'})
                 right = base[['gameid', 'side', 'champion']].rename(columns={'champion': 'champion_y'})
                 merged = left.merge(right, on=['gameid', 'side'])
-                merged = merged[merged['champion_x'] < merged['champion_y']]  # dedupe unordered pairs, drop self-pairs
+                # 'champion' is a categorical (unordered) column for memory efficiency, and
+                # unordered categoricals can't be compared with < directly — compare as plain
+                # strings instead to dedupe unordered pairs and drop self-pairs.
+                merged = merged[merged['champion_x'].astype(str) < merged['champion_y'].astype(str)]
                 if merged.empty:
                     return pd.DataFrame(), champ_wr
 
-                pair_stats = merged.groupby(['champion_x', 'champion_y']).agg(
+                pair_stats = merged.groupby(['champion_x', 'champion_y'], observed=True).agg(
                     win_rate=('result_x', 'mean'), games=('result_x', 'size')
                 ).reset_index()
                 pair_stats = pair_stats[pair_stats['games'] >= MIN_SYN_GAMES]
@@ -660,7 +693,7 @@ else:
             MIN_HERO_WR_GAMES = 3
             NEGLIGIBLE_PP = 2  # percentage-point threshold below which a signal counts as a tie
 
-            champ_league_stats = fp.groupby('champion').agg(wr=('result', 'mean'), games=('result', 'size'))
+            champ_league_stats = fp.groupby('champion', observed=True).agg(wr=('result', 'mean'), games=('result', 'size'))
 
             def hero_wr_avg(champ_list):
                 vals, excluded = [], []

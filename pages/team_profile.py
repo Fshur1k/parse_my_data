@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import time
 
+from data_loader import DEFAULT_FILE_PATH, get_active_dataframe
+
 st.set_page_config(page_title="Профіль команд | LoL", layout="wide")
 
 lang_choice = st.sidebar.radio("Language", ["Українська", "English"], label_visibility="collapsed")
@@ -10,8 +12,8 @@ lang = "uk" if lang_choice == "Українська" else "en"
 
 st.title("🛡️ Профіль команд та Предикт матчу" if lang == "uk" else "🛡️ Team Profile & Match Predictor")
 
-# Отримуємо базу з кешу
-df = st.session_state.get('df', None)
+# Отримуємо спільний датасет (єдина копія на весь застосунок, а не на кожну сесію)
+df = get_active_dataframe(DEFAULT_FILE_PATH)
 
 if df is None:
     st.info("👋 Завантажте файл бази на головній сторінці, щоб використовувати цей інструмент." if lang == "uk" else "👋 Load the database file on the main page to use this tool.")
@@ -317,9 +319,6 @@ else:
             # ==========================================
             # --- 7. ІНТЕГРОВАНИЙ LIVE PREDICTOR ---
             # ==========================================
-            import time
-            import numpy as np
-
             st.markdown("---")
             st.header("🔴 Live Предикт (In-Play)" if lang == "uk" else "🔴 Live Predictor (In-Play)")
             st.caption("Цей інструмент автоматично використовує очікування (Тотали та Темп), розраховані математичною моделлю вище." if lang == "uk" else "This tool automatically uses the expectations (Totals and Pace) calculated by the math model above.")

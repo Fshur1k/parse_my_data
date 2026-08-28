@@ -4,6 +4,8 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
+from data_loader import DEFAULT_FILE_PATH, get_active_dataframe, load_uploaded_dataset, load_default_dataset
+
 st.set_page_config(page_title="Експорт Матчів | LoL", layout="wide")
 
 TRANSLATIONS = {
@@ -27,29 +29,8 @@ lang_choice = st.sidebar.radio("Language", ["Українська", "English"], 
 lang = "uk" if lang_choice == "Українська" else "en"
 t = TRANSLATIONS[lang]
 
-# ==========================================
-# ⚙️ НАЛАШТУВАННЯ ЗАВАНТАЖЕННЯ
-# ==========================================
-# Вказуємо назву файлу, який лежить поруч із app.py на GitHub
-DEFAULT_FILE_PATH = "2026_LoL_esports_match_data_from_OraclesElixir.csv.zip"
-
 if 'sheet_url' not in st.session_state: st.session_state['sheet_url'] = "https://docs.google.com/spreadsheets/d/1kjn9qTW1tgMNtqRwYCg0bQBWvjC9pJ6K-LZ6-G2o274/edit?gid=0#gid=0"
 if 'sheet_name' not in st.session_state: st.session_state['sheet_name'] = "Sheets1"
-
-@st.cache_data(ttl=3600)
-def load_csv(source):
-    # Визначаємо, чи передали нам рядок (шлях до файлу) чи об'єкт (UploadedFile)
-    filename = source.name if hasattr(source, 'name') else str(source)
-    
-    # Якщо це zip архів, вказуємо компресію
-    if filename.endswith('.zip'):
-        d = pd.read_csv(source, low_memory=False, compression='zip').copy()
-    else:
-        d = pd.read_csv(source, low_memory=False).copy()
-        
-    d['parsed_datetime'] = pd.to_datetime(d['date'], errors='coerce')
-    d['date_only'] = d['parsed_datetime'].dt.date
-    return d
 
 def get_time_ago(last_date):
     """Форматує час, що пройшов з дати останнього матчу"""
@@ -68,13 +49,14 @@ def get_time_ago(last_date):
     else:
         return f"{days} днів тому" if lang == "uk" else f"{days} days ago"
 
-# --- ПРЕДЗАВАНТАЖЕННЯ БАЗИ ---
-if 'df' not in st.session_state or st.session_state['df'] is None:
-    try:
-        st.session_state['df'] = load_csv(DEFAULT_FILE_PATH)
-    except Exception as e:
-        st.session_state['df'] = None
-        st.error(f"Помилка зчитування дефолтного файлу: {e}")
+# --- ЗАВАНТАЖЕННЯ БАЗИ ---
+# [Changed from an eager per-session load into st.session_state to a lazy call into
+#  the shared, single-copy cache_resource loader in data_loader.py. The default
+#  dataset is still loaded automatically (no upload required to see anything), but
+#  now costs memory once for the whole app instead of once per visitor/session.]
+df = get_active_dataframe(DEFAULT_FILE_PATH)
+if df is None and 'load_error' in st.session_state:
+    st.error(f"Помилка зчитування дефолтного файлу: {st.session_state['load_error']}")
 
 # Допоміжні функції (Google Sheets та Парсинг)
 def get_gspread_client():
@@ -168,8 +150,6 @@ st.title(t["title"])
 
 st.sidebar.header(t["sidebar_header"])
 
-df = st.session_state['df']
-
 # Виводимо інформацію про останній апдейт у боковому меню
 if df is not None:
     last_match_date = df['date_only'].max()
@@ -180,13 +160,29 @@ if df is not None:
 with st.sidebar.expander("📁 Завантажити новий файл" if lang == "uk" else "📁 Upload new file"):
     # ВИПРАВЛЕННЯ 1: Дозволяємо завантажувати і csv, і zip
     uploaded_file = st.file_uploader("CSV / ZIP", type=['csv', 'zip'], label_visibility="collapsed")
-    
+
     # ВИПРАВЛЕННЯ 2: Запобіжник від нескінченного циклу
     # Перевіряємо, чи ми вже завантажували САМЕ ЦЕЙ файл
-    if uploaded_file and st.session_state.get('uploaded_filename') != uploaded_file.name: 
-        st.session_state['df'] = load_csv(uploaded_file)
+    if uploaded_file and st.session_state.get('uploaded_filename') != uploaded_file.name:
+        # [Uploads go into session_state as 'custom_df', separate from the shared
+        #  default dataset — this is genuinely per-session data, so per-session
+        #  memory is correct here rather than something to optimize away.]
+        st.session_state['custom_df'] = load_uploaded_dataset(uploaded_file)
         st.session_state['uploaded_filename'] = uploaded_file.name # Запам'ятовуємо ім'я
         st.rerun() # Оновлюємо сторінку лише ОДИН раз
+
+    if st.session_state.get('custom_df') is not None:
+        if st.button("↩️ Повернутися до бази за замовчуванням" if lang == "uk" else "↩️ Revert to default database"):
+            st.session_state.pop('custom_df', None)
+            st.session_state.pop('uploaded_filename', None)
+            st.rerun()
+
+# Технічна дія для адміністратора: скинути спільний кеш і перечитати дефолтний файл
+# (потрібно, наприклад, після заміни файлу бази на GitHub).
+with st.sidebar.expander("🛠️ Технічне" if lang == "uk" else "🛠️ Maintenance"):
+    if st.button("🔄 Очистити кеш і перезавантажити базу" if lang == "uk" else "🔄 Clear cache & reload database"):
+        load_default_dataset.clear()
+        st.rerun()
 
 if df is not None:
     t_df = df[df['position'] == 'team'].copy()
